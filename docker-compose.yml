@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: legalai-postgres
+    environment:
+      POSTGRES_DB: legalai_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 10092002
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: legalai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+      dockerfile: Dockerfile
+    container_name: legalai-auth-service
+    environment:
+      - NODE_ENV=production
+      - PORT=5001
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=legalai_db
+      - DB_USER=postgres
+      - DB_PASSWORD=10092002
+      - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-this}
+      - JWT_EXPIRES_IN=7d
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_CALLBACK_URL=http://localhost:8000/api/auth/google/callback
+      - GATEWAY_URL=http://localhost:8000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "5001:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: legalai-api-gateway
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      - AUTH_SERVICE_URL=http://auth-service:5001
+      - CLIENT_URL=http://localhost:3000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - auth-service
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
