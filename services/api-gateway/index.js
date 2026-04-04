@@ -1,6 +1,7 @@
 const express = require('express');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const cors = require('cors');
+const { mountListen } = require('../graceful-listen');
 require('dotenv').config();
 
 const app = express();
@@ -83,8 +84,8 @@ app.get('/', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 8000;
+const PORT = Number(process.env.PORT) || 8000;
 
-app.listen(PORT, () => {
+mountListen(app, PORT, 'api-gateway', () => {
   console.log(`Gateway: http://localhost:${PORT} -> Auth: ${AUTH_SERVICE_URL}, Documents: ${DOCUMENT_SERVICE_URL}, Chat: ${CHAT_SERVICE_URL}`);
 });

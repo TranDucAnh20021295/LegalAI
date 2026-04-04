@@ -24,7 +24,7 @@ class User {
   }
 
   static async create(userData) {
-    const { fullName, email, password, loginProvider = 'LOCAL', role = 'USER' } = userData;
+    const { fullName, email, password, loginProvider = 'LOCAL', role = 'USER', isActive = true } = userData;
     const userId = uuidv4();
     let passwordHash = null;
 
@@ -33,12 +33,12 @@ class User {
     }
 
     const query = `
-      INSERT INTO users ("userId", "fullName", email, "passwordHash", "loginProvider", role)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id, "userId", "fullName", email, "loginProvider", role, "createdAt", "updatedAt"
+      INSERT INTO users ("userId", "fullName", email, "passwordHash", "loginProvider", role, "isActive")
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING id, "userId", "fullName", email, "loginProvider", role, "isActive", "createdAt", "updatedAt"
     `;
 
-    const values = [userId, fullName, email, passwordHash, loginProvider, role];
+    const values = [userId, fullName, email, passwordHash, loginProvider, role, isActive];
     const result = await pool.query(query, values);
     return result.rows[0];
   }
@@ -60,11 +60,11 @@ class User {
     const values = [];
     let paramCount = 1;
 
-    if (updateData.fullName) {
+    if (updateData.fullName !== undefined) {
       fields.push(`"fullName" = $${paramCount++}`);
       values.push(updateData.fullName);
     }
-    if (updateData.email) {
+    if (updateData.email !== undefined) {
       fields.push(`email = $${paramCount++}`);
       values.push(updateData.email);
     }
@@ -81,11 +81,29 @@ class User {
       UPDATE users 
       SET ${fields.join(', ')}
       WHERE "userId" = $${paramCount}
-      RETURNING id, "userId", "fullName", email, "loginProvider", role, "createdAt", "updatedAt"
+      RETURNING id, "userId", "fullName", email, "loginProvider", role, "isActive", "createdAt", "updatedAt"
     `;
 
     const result = await pool.query(query, values);
     return result.rows[0];
+  }
+
+  static async findAll() {
+    const query =
+      'SELECT "userId", "fullName", email, "loginProvider", role, "isActive", "createdAt", "updatedAt" FROM users ORDER BY "createdAt" DESC';
+    const result = await pool.query(query);
+    return result.rows;
+  }
+
+  static async setActive(userId, active) {
+    const query = `
+      UPDATE users
+      SET "isActive" = $1, "updatedAt" = CURRENT_TIMESTAMP
+      WHERE "userId" = $2
+      RETURNING "userId", "fullName", email, "loginProvider", role, "isActive", "createdAt", "updatedAt"
+    `;
+    const result = await pool.query(query, [!!active, userId]);
+    return result.rows[0] || null;
   }
 
   static async verifyPassword(password, passwordHash) {

@@ -3,46 +3,26 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { authAPI } from '@/lib/api';
+import { getUserToken, clearUserToken } from '@/lib/auth-storage';
 import SettingsShell from '@/components/SettingsShell';
-
-const inputStyle = {
-  width: '100%',
-  padding: '14px 48px 14px 18px',
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
-  borderRadius: '10px',
-  fontSize: '17px',
-  color: '#1e293b',
-  outline: 'none',
-};
+import styles from './page.module.css';
 
 const PasswordInput = ({ value, onChange, placeholder, ...props }) => {
   const [show, setShow] = useState(false);
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
+    <div className={styles.pwWrap}>
       <input
         type={show ? 'text' : 'password'}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        style={inputStyle}
+        className={styles.pwInput}
         {...props}
       />
       <button
         type="button"
         onClick={() => setShow(!show)}
-        style={{
-          position: 'absolute',
-          right: '12px',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          background: 'none',
-          border: 'none',
-          color: '#64748b',
-          cursor: 'pointer',
-          padding: '4px',
-          display: 'flex',
-        }}
+        className={styles.togglePw}
         tabIndex={-1}
       >
         {show ? (
@@ -73,8 +53,7 @@ export default function ChangePasswordPage() {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    if (!getUserToken()) {
       router.push('/');
       return;
     }
@@ -86,7 +65,7 @@ export default function ChangePasswordPage() {
           setError('Tài khoản đăng nhập Google không thể đổi mật khẩu');
         }
       } catch (err) {
-        localStorage.removeItem('token');
+        clearUserToken();
         router.push('/');
       } finally {
         setLoading(false);
@@ -125,51 +104,27 @@ export default function ChangePasswordPage() {
   };
 
   if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', color: '#64748b' }}>
-        Đang tải...
-      </div>
-    );
+    return <div className={styles.loading}>Đang tải...</div>;
   }
 
   return (
     <SettingsShell user={user} activeMenu="change-password">
-      <div style={{ width: '100%' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: '600', color: '#1e293b', marginBottom: '10px' }}>
-          Đổi mật khẩu
-        </h1>
-        <p style={{ fontSize: '17px', color: '#64748b', marginBottom: '28px' }}>
-          Để bảo mật tài khoản, vui lòng không chia sẻ mật khẩu cho người khác
-        </p>
+      <div className={styles.wrap}>
+        <h1 className={styles.title}>Đổi mật khẩu</h1>
+        <p className={styles.intro}>Để bảo mật tài khoản, vui lòng không chia sẻ mật khẩu cho người khác</p>
 
         {success ? (
-          <div style={{
-            padding: '16px',
-            background: 'rgba(34, 197, 94, 0.15)',
-            borderRadius: '12px',
-            color: '#15803d',
-          }}>
-            Đổi mật khẩu thành công.
-          </div>
+          <div className={styles.successBox}>Đổi mật khẩu thành công.</div>
         ) : user?.loginProvider !== 'LOCAL' ? (
-          <p style={{ color: '#dc2626' }}>{error}</p>
+          <p className={styles.errorInline}>{error}</p>
         ) : (
           <>
-            {error && (
-              <div style={{
-                padding: '12px',
-                marginBottom: '20px',
-                background: 'rgba(239, 68, 68, 0.1)',
-                color: '#dc2626',
-                borderRadius: '8px',
-                fontSize: '14px',
-              }}>{error}</div>
-            )}
+            {error && <div className={styles.errorBanner}>{error}</div>}
 
             <form onSubmit={handleSubmit}>
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#374151', fontSize: '17px', fontWeight: '500', marginBottom: '8px' }}>
-                  Mật khẩu hiện tại <span style={{ color: '#dc2626' }}>*</span>
+              <div className={styles.formGroup}>
+                <label className={styles.label}>
+                  Mật khẩu hiện tại <span className={styles.required}>*</span>
                 </label>
                 <PasswordInput
                   value={currentPassword}
@@ -179,9 +134,9 @@ export default function ChangePasswordPage() {
                   autoComplete="current-password"
                 />
               </div>
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', color: '#374151', fontSize: '17px', fontWeight: '500', marginBottom: '8px' }}>
-                  Mật khẩu mới <span style={{ color: '#dc2626' }}>*</span>
+              <div className={styles.formGroup}>
+                <label className={styles.label}>
+                  Mật khẩu mới <span className={styles.required}>*</span>
                 </label>
                 <PasswordInput
                   value={newPassword}
@@ -192,9 +147,9 @@ export default function ChangePasswordPage() {
                   autoComplete="new-password"
                 />
               </div>
-              <div style={{ marginBottom: '28px' }}>
-                <label style={{ display: 'block', color: '#374151', fontSize: '17px', fontWeight: '500', marginBottom: '8px' }}>
-                  Xác nhận mật khẩu mới <span style={{ color: '#dc2626' }}>*</span>
+              <div className={styles.formGroupLast}>
+                <label className={styles.label}>
+                  Xác nhận mật khẩu mới <span className={styles.required}>*</span>
                 </label>
                 <PasswordInput
                   value={confirmPassword}
@@ -204,23 +159,7 @@ export default function ChangePasswordPage() {
                   autoComplete="new-password"
                 />
               </div>
-              <button
-                type="submit"
-                disabled={submitting}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '14px 28px',
-                  background: submitting ? '#94a3b8' : '#1e40af',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '10px',
-                  fontSize: '17px',
-                  fontWeight: '600',
-                  cursor: submitting ? 'not-allowed' : 'pointer',
-                }}
-              >
+              <button type="submit" disabled={submitting} className={styles.submitBtn}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                 </svg>

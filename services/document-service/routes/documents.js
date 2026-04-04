@@ -1,7 +1,7 @@
 const express = require('express');
 const LegalDocument = require('../models/LegalDocument');
 const DocumentChunk = require('../models/DocumentChunk');
-const { getEmbedding, isLocal } = require('../lib/embedding');
+const { getEmbedding, isLocal, getEmbeddingStatus, getEmbeddingFailureHint } = require('../lib/embedding');
 const { splitTextIntoChunks } = require('../lib/splitText');
 
 const router = express.Router();
@@ -79,13 +79,16 @@ router.get('/search/semantic', async (req, res) => {
     if (!embedding) {
       return res.status(503).json({
         message: 'Không thể tạo embedding. Kiểm tra OPENAI_API_KEY hoặc embedding-service.',
+        hint: getEmbeddingFailureHint(),
+        ...getEmbeddingStatus(),
         queryEmbedded: false,
       });
     }
-    const chunks = await DocumentChunk.searchSimilar(embedding, parseInt(limit, 10) || 10, isLocal);
+    const lim = parseInt(limit, 10) || 20;
+    const chunks = await DocumentChunk.searchSimilarWithDocuments(embedding, lim, isLocal);
     res.json({
       chunks,
-      meta: { queryEmbedded: true, count: chunks.length },
+      meta: { queryEmbedded: true, count: chunks.length, mode: 'semantic' },
     });
   } catch (error) {
     console.error('[Documents] semantic search error:', error);

@@ -2,29 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { authAPI } from '@/lib/api';
+import { authAPI, chatAPI } from '@/lib/api';
+import { getUserToken } from '@/lib/auth-storage';
 import SettingsShell from '@/components/SettingsShell';
+import styles from './page.module.css';
 
 const Section = ({ title, onEdit, children }) => (
-  <div style={{ marginBottom: '32px' }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-      <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1e293b', margin: 0 }}>
-        {title}
-      </h2>
+  <div className={styles.section}>
+    <div className={styles.sectionHead}>
+      <h2 className={styles.sectionTitle}>{title}</h2>
       <button
         type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit?.(); }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          background: 'none',
-          border: 'none',
-          color: '#1e40af',
-          fontSize: '15px',
-          cursor: 'pointer',
-          padding: '4px 0',
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onEdit?.();
         }}
+        className={styles.editBtn}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -38,18 +32,9 @@ const Section = ({ title, onEdit, children }) => (
 );
 
 const FieldRow = ({ label, value }) => (
-  <div style={{
-    padding: '14px 0',
-    borderBottom: '1px solid #e2e8f0',
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: '16px',
-  }}>
-    <span style={{ fontSize: '16px', color: '#64748b', flexShrink: 0 }}>{label}</span>
-    <span style={{ fontSize: '16px', color: '#1e293b', textAlign: 'right', wordBreak: 'break-word' }}>
-      {value || '—'}
-    </span>
+  <div className={styles.fieldRow}>
+    <span className={styles.fieldLabel}>{label}</span>
+    <span className={styles.fieldValue}>{value || '—'}</span>
   </div>
 );
 
@@ -61,88 +46,22 @@ const EditModal = ({ title, label, value, error, saving, onClose, onSave }) => {
   }, [value]);
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0,0,0,0.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10000,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: '#ffffff',
-          borderRadius: '12px',
-          padding: '28px 32px',
-          width: '100%',
-          maxWidth: '440px',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.15)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h2 style={{ fontSize: '20px', fontWeight: '600', color: '#1e293b', marginBottom: '20px' }}>
-          {title}
-        </h2>
-        <label style={{ display: 'block', fontSize: '15px', color: '#374151', marginBottom: '8px' }}>
-          {label}
-        </label>
+    <div className={styles.modalOverlay} onClick={onClose}>
+      <div className={styles.modalPanel} onClick={(e) => e.stopPropagation()}>
+        <h2 className={styles.modalTitle}>{title}</h2>
+        <label className={styles.modalLabel}>{label}</label>
         <input
           type={label === 'Email' ? 'email' : 'text'}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '12px 16px',
-            background: '#f8fafc',
-            border: '1px solid #e2e8f0',
-            borderRadius: '10px',
-            fontSize: '16px',
-            color: '#1e293b',
-            outline: 'none',
-            marginBottom: '24px',
-            boxSizing: 'border-box',
-          }}
+          className={styles.modalInput}
         />
-        {error && (
-          <p style={{ color: '#dc2626', fontSize: '14px', marginBottom: '16px' }}>{error}</p>
-        )}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={saving}
-            style={{
-              padding: '12px 24px',
-              background: '#ffffff',
-              border: '1px solid #e2e8f0',
-              borderRadius: '10px',
-              fontSize: '15px',
-              color: '#374151',
-              cursor: 'pointer',
-            }}
-          >
+        {error && <p className={styles.modalError}>{error}</p>}
+        <div className={styles.modalActions}>
+          <button type="button" onClick={onClose} disabled={saving} className={styles.btnCancel}>
             Hủy
           </button>
-          <button
-            type="button"
-            onClick={() => onSave(draft)}
-            disabled={saving}
-            style={{
-              padding: '12px 24px',
-              background: '#1e40af',
-              border: 'none',
-              borderRadius: '10px',
-              fontSize: '15px',
-              color: '#ffffff',
-              fontWeight: '600',
-              cursor: saving ? 'not-allowed' : 'pointer',
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
+          <button type="button" onClick={() => onSave(draft)} disabled={saving} className={styles.btnSave}>
             {saving ? 'Đang lưu...' : 'Lưu thay đổi'}
           </button>
         </div>
@@ -155,18 +74,39 @@ export default function ProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [subscription, setSubscription] = useState({ active: false, plan: null, endsAt: null });
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
   const [editModal, setEditModal] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    if (!getUserToken()) {
       router.push('/');
       return;
     }
-    authAPI.getMe().then(setUser).catch(() => router.push('/')).finally(() => setLoading(false));
+    authAPI
+      .getMe()
+      .then(setUser)
+      .catch(() => router.push('/'))
+      .finally(() => setLoading(false));
   }, [router]);
+
+  useEffect(() => {
+    if (!user) return;
+    setSubscriptionLoading(true);
+    chatAPI
+      .getSubscriptionMe()
+      .then((data) => {
+        setSubscription({
+          active: !!data.active,
+          plan: data.plan || null,
+          endsAt: data.endsAt || null,
+        });
+      })
+      .catch(() => setSubscription({ active: false, plan: null, endsAt: null }))
+      .finally(() => setSubscriptionLoading(false));
+  }, [user]);
 
   const handleEditFullName = () => setEditModal('fullName');
   const handleEditEmail = () => setEditModal('email');
@@ -204,19 +144,13 @@ export default function ProfilePage() {
   };
 
   if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', color: '#64748b' }}>
-        Đang tải...
-      </div>
-    );
+    return <div className={styles.loading}>Đang tải...</div>;
   }
 
   return (
     <SettingsShell user={user} activeMenu="profile">
-      <div style={{ width: '100%' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: '600', color: '#1e293b', marginBottom: '32px' }}>
-          Hồ sơ cá nhân
-        </h1>
+      <div className={styles.wrap}>
+        <h1 className={styles.pageTitle}>Hồ sơ cá nhân</h1>
 
         <Section title="Thông tin cá nhân" onEdit={handleEditFullName}>
           <FieldRow label="Họ và tên" value={user?.fullName} />
@@ -225,6 +159,31 @@ export default function ProfilePage() {
         <Section title="Địa chỉ Email" onEdit={handleEditEmail}>
           <FieldRow label="Email" value={user?.email} />
         </Section>
+
+        <div className={styles.subBlock}>
+          <h2 className={styles.subTitle}>Gói chat LegalAI</h2>
+          {subscriptionLoading ? (
+            <p className={styles.subMuted}>Đang tải…</p>
+          ) : subscription.active ? (
+            <>
+              <FieldRow
+                label="Loại gói"
+                value={subscription.plan === 'year' ? '1 năm (cũ)' : '1 tháng'}
+              />
+              <FieldRow
+                label="Hết hạn"
+                value={
+                  subscription.endsAt ? new Date(subscription.endsAt).toLocaleDateString('vi-VN') : '—'
+                }
+              />
+            </>
+          ) : (
+            <p className={styles.subMuted}>
+              Bạn chưa có gói đang hoạt động. Mua hoặc kích hoạt gói tại trang trò chuyện (dashboard) sau khi
+              đăng nhập.
+            </p>
+          )}
+        </div>
       </div>
 
       {editModal === 'fullName' && (

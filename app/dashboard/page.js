@@ -1,9 +1,13 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authAPI, chatAPI } from '@/lib/api';
+import { getUserToken, clearUserToken } from '@/lib/auth-storage';
+import ChatAiMessage from '@/components/ChatAiMessage';
+import shell from './dashboard-shell.module.css';
+import styles from './page.module.css';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -14,10 +18,28 @@ export default function Dashboard() {
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [sending, setSending] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState({ open: false, conversation: null });
+  const [renameDialog, setRenameDialog] = useState({ open: false, conversation: null, title: '' });
+  const [conversationMenuId, setConversationMenuId] = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const settingsRef = useRef(null);
   const messagesEndRef = useRef(null);
+
+  const [subscription, setSubscription] = useState({ active: false, plan: null, endsAt: null });
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+
+  const handleRenameConversation = (conv) => {
+    setRenameDialog({
+      open: true,
+      conversation: conv,
+      title: conv.title || 'Cuộc hội thoại mới',
+    });
+  };
+
+  const handleDeleteConversation = (conv) => {
+    setConfirmDelete({ open: true, conversation: conv });
+  };
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -30,8 +52,7 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
+    if (!getUserToken()) {
       router.push('/');
       return;
     }
@@ -40,7 +61,7 @@ export default function Dashboard() {
         const userData = await authAPI.getMe();
         setUser(userData);
       } catch (error) {
-        localStorage.removeItem('token');
+        clearUserToken();
         router.push('/');
       } finally {
         setLoading(false);
@@ -54,6 +75,47 @@ export default function Dashboard() {
     chatAPI.listConversations().then(setConversations).catch(() => setConversations([]));
   }, [user]);
 
+  const syncSubscription = useCallback(
+    (withLoading) => {
+      if (!user) return Promise.resolve();
+      if (withLoading) setSubscriptionLoading(true);
+      return chatAPI
+        .getSubscriptionMe()
+        .then((data) => {
+          setSubscription({
+            active: !!data.active,
+            plan: data.plan || null,
+            endsAt: data.endsAt || null,
+          });
+        })
+        .catch(() => setSubscription({ active: false, plan: null, endsAt: null }))
+        .finally(() => {
+          if (withLoading) setSubscriptionLoading(false);
+        });
+    },
+    [user]
+  );
+
+  useEffect(() => {
+    syncSubscription(true);
+  }, [syncSubscription]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    const onVis = () => {
+      if (document.visibilityState === 'visible') syncSubscription(false);
+    };
+    const onFocus = () => syncSubscription(false);
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    const t = setInterval(() => syncSubscription(false), 8000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
+      clearInterval(t);
+    };
+  }, [user, syncSubscription]);
+
   useEffect(() => {
     if (!activeConversationId) {
       setMessages([]);
@@ -66,34 +128,81 @@ export default function Dashboard() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  const animateAiReply = (aiMsg) => {
+    const fullText = aiMsg?.content || '';
+    if (!fullText) return;
+    const messageId = aiMsg.messageId;
+    const createdAt = aiMsg.createdAt || new Date().toISOString();
+    const metadata = aiMsg.metadata ?? null;
+    setMessages((prev) => [
+      ...prev,
+      { messageId, content: '', senderType: 'AI', createdAt, metadata },
+    ]);
+    let index = 0;
+    const step = 3;
+    const interval = setInterval(() => {
+      index += step;
+      const slice = fullText.slice(0, index);
+      setMessages((prev) =>
+        prev.map((m) => (m.messageId === messageId ? { ...m, content: slice, metadata } : m))
+      );
+      if (index >= fullText.length) {
+        clearInterval(interval);
+      }
+    }, 15);
+  };
+
   const handleNewConversation = async () => {
-    try {
-      const conv = await chatAPI.createConversation();
-      setConversations((prev) => [conv, ...prev]);
-      setActiveConversationId(conv.conversationId);
-    } catch (err) {
-      console.error(err);
-    }
+    // Chỉ reset trạng thái, chưa tạo cuộc hội thoại cho tới khi gửi tin nhắn đầu tiên
+    setActiveConversationId(null);
+    setMessages([]);
+    setQuestion('');
   };
 
   const handleSend = async () => {
     const text = question.trim();
-    if (!text || !activeConversationId || sending) return;
+    if (!text || sending) return;
+    if (!subscription.active) return;
+    const tempId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const userMessage = {
+      messageId: tempId,
+      content: text,
+      senderType: 'USER',
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMessage]);
     setQuestion('');
     setSending(true);
+    let createdConv = null;
     try {
-      const res = await chatAPI.sendMessage(activeConversationId, text, 'USER');
-      if (res.aiMessage) {
-        setMessages((prev) => [
-          ...prev,
-          { content: res.userMessage.content, senderType: 'USER', createdAt: res.userMessage.createdAt },
-          { content: res.aiMessage.content, senderType: 'AI', createdAt: res.aiMessage.createdAt },
-        ]);
-      } else {
-        setMessages((prev) => [...prev, { content: text, senderType: 'USER', createdAt: new Date().toISOString() }]);
+      let conversationId = activeConversationId;
+      if (!conversationId) {
+        const conv = await chatAPI.createConversation();
+        createdConv = conv;
+        setConversations((prev) => [conv, ...prev]);
+        setActiveConversationId(conv.conversationId);
+        conversationId = conv.conversationId;
+      }
+
+      const res = await chatAPI.sendMessage(conversationId, text, 'USER');
+      if (res.aiMessage?.content) {
+        animateAiReply(res.aiMessage);
       }
     } catch (err) {
       console.error(err);
+      setMessages((prev) => prev.filter((m) => m.messageId !== tempId));
+      setQuestion(text);
+      const st = err?.response?.status;
+      if (st === 403) {
+        setSubscription({ active: false, plan: null, endsAt: null });
+        setSubscriptionLoading(false);
+        if (createdConv) {
+          setConversations((prev) => prev.filter((c) => c.conversationId !== createdConv.conversationId));
+          setActiveConversationId(null);
+          setMessages([]);
+        }
+        syncSubscription(false);
+      }
     } finally {
       setSending(false);
     }
@@ -101,274 +210,180 @@ export default function Dashboard() {
 
   const handleLogout = async () => {
     await authAPI.logout();
-    localStorage.removeItem('token');
+    clearUserToken();
     router.push('/');
   };
 
   if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', color: '#94a3b8' }}>
-        Đang tải...
-      </div>
-    );
+    return <div className={shell.loadingCenter}>Đang tải...</div>;
   }
 
-  const sidebarWidth = sidebarCollapsed ? 64 : 280;
-  const sidebarStyle = {
-    width: sidebarWidth,
-    minWidth: sidebarWidth,
-    minHeight: '100vh',
-    background: '#0f172a',
-    borderRight: '1px solid #1e293b',
-    display: 'flex',
-    flexDirection: 'column',
-    padding: sidebarCollapsed ? '16px 8px' : '20px 16px',
-    transition: 'width 0.2s ease, padding 0.2s ease',
-  };
+  const sb = sidebarCollapsed;
 
-  const mainStyle = {
-    flex: 1,
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '40px 40px 32px',
-    background: '#0a192f',
-    position: 'relative',
-    overflow: 'hidden',
-  };
+  const sendButtonReady = !sending && question.trim().length > 0;
+
+  const showSubscriptionPaywall = !subscription.active && !subscriptionLoading;
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', display: 'flex', background: '#0a192f', overflow: 'hidden' }}>
-      <aside style={sidebarStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px', justifyContent: sidebarCollapsed ? 'stretch' : 'flex-start', width: '100%' }}>
-          {!sidebarCollapsed && (
-            <Link href="/dashboard" style={{ fontSize: '22px', fontWeight: '700', color: '#ffffff', flex: 1 }}>
+    <div className={shell.layoutRoot}>
+      <aside className={`${shell.sidebar} ${sb ? shell.sidebarNarrow : ''}`}>
+        <div className={`${shell.sidebarHeader} ${sb ? shell.sidebarHeaderNarrow : ''}`}>
+          {!sb && (
+            <Link href="/dashboard" className={shell.brandLink}>
               LegalAI
             </Link>
           )}
           <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            style={{
-              width: sidebarCollapsed ? '100%' : '40px',
-              height: '40px',
-              minWidth: sidebarCollapsed ? 'auto' : '40px',
-              minHeight: '40px',
-              borderRadius: '10px',
-              background: 'transparent',
-              border: sidebarCollapsed ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid #334155',
-              color: sidebarCollapsed ? '#ffffff' : '#64748b',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              flexShrink: sidebarCollapsed ? 0 : 0,
-            }}
-            title={sidebarCollapsed ? 'Mở rộng sidebar' : 'Thu gọn sidebar'}
+            type="button"
+            onClick={() => setSidebarCollapsed(!sb)}
+            className={`${shell.collapseBtn} ${sb ? shell.collapseBtnNarrow : ''}`}
+            title={sb ? 'Mở rộng sidebar' : 'Thu gọn sidebar'}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ transform: sidebarCollapsed ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className={`${shell.chevron} ${sb ? shell.chevronRotated : ''}`}
+            >
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
         </div>
 
         <button
+          type="button"
           onClick={handleNewConversation}
-          style={{
-            width: '100%',
-            height: '40px',
-            minHeight: '40px',
-            padding: sidebarCollapsed ? '0' : '0 16px',
-            background: sidebarCollapsed ? 'transparent' : '#1e293b',
-            border: sidebarCollapsed ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid #334155',
-            borderRadius: '10px',
-            color: '#ffffff',
-            fontSize: '15px',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: '10px',
-            cursor: 'pointer',
-            marginBottom: '8px',
-          }}
+          className={`${shell.sideNavItem} ${sb ? shell.sideNavItemNarrow : ''}`}
           title="Trò chuyện mới"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={shell.iconShrink}>
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
           </svg>
-          {!sidebarCollapsed && 'Trò chuyện mới'}
+          {!sb && 'Trò chuyện mới'}
         </button>
 
         <Link
           href="/dashboard/documents"
-          style={{
-            width: '100%',
-            height: '40px',
-            minHeight: '40px',
-            padding: sidebarCollapsed ? '0' : '0 16px',
-            background: sidebarCollapsed ? 'transparent' : '#1e293b',
-            border: sidebarCollapsed ? '1px solid rgba(59, 130, 246, 0.5)' : '1px solid #334155',
-            borderRadius: '10px',
-            color: '#ffffff',
-            fontSize: '15px',
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-            gap: '10px',
-            cursor: 'pointer',
-            marginBottom: sidebarCollapsed ? '16px' : '24px',
-            textDecoration: 'none',
-          }}
+          className={sb ? shell.sideNavItemDocsNarrow : shell.sideNavItemDocs}
           title="Tra cứu văn bản/án lệ"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={shell.iconShrink}>
             <path d="M12 3v18M8 21h8M10 21V9l2-4 2 4v12M8 9l4-6 4 6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          {!sidebarCollapsed && 'Tra cứu văn bản/án lệ'}
+          {!sb && 'Tra cứu văn bản/án lệ'}
         </Link>
 
-        {!sidebarCollapsed && (
-          <div style={{ flex: 1, overflow: 'auto', marginBottom: '16px' }}>
+        {!sb && (
+          <div className={shell.historySection}>
+            <div className={shell.historyLabel}>Lịch sử trò chuyện</div>
             {conversations.length === 0 ? (
-              <div style={{ border: '1px dashed #334155', borderRadius: '8px', padding: '24px' }}>
-                <div style={{ textAlign: 'center', color: '#64748b' }}>
-                  <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ margin: '0 auto 12px' }}>
+              <div className={shell.emptyConvWrap}>
+                <div className={shell.emptyConvInner}>
+                  <svg width={32} height={32} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={shell.emptyConvIcon}>
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   </svg>
-                  <p style={{ fontSize: '14px', marginBottom: '4px' }}>Chưa có phiên làm việc nào</p>
-                  <p style={{ fontSize: '12px' }}>Bấm &quot;Trò chuyện mới&quot; để bắt đầu</p>
+                  <p className={shell.emptyConvTitle}>Chưa có phiên làm việc nào</p>
+                  <p className={shell.emptyConvHint}>Bấm &quot;Trò chuyện mới&quot; để bắt đầu</p>
                 </div>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div className={shell.convList}>
                 {conversations.map((c) => (
-                  <button
+                  <div
                     key={c.conversationId}
-                    onClick={() => setActiveConversationId(c.conversationId)}
-                    style={{
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: activeConversationId === c.conversationId ? '#334155' : 'transparent',
-                      color: '#e2e8f0',
-                      fontSize: '14px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+                    className={`conversation-item ${activeConversationId === c.conversationId ? styles.convRowActive : styles.convRow}`}
                   >
-                    {c.title}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveConversationId(c.conversationId)}
+                      className={styles.convTitleBtn}
+                    >
+                      {c.title}
+                    </button>
+                    <button
+                      type="button"
+                      className={`conversation-menu-btn ${styles.menuBtn}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConversationMenuId((prev) =>
+                          prev === c.conversationId ? null : c.conversationId
+                        );
+                      }}
+                      title="Tùy chọn"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <circle cx="12" cy="5" r="1.5" />
+                        <circle cx="12" cy="12" r="1.5" />
+                        <circle cx="12" cy="19" r="1.5" />
+                      </svg>
+                    </button>
+                    {conversationMenuId === c.conversationId && (
+                      <div className={styles.dropdownMenu}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConversationMenuId(null);
+                            handleRenameConversation(c);
+                          }}
+                          className={styles.dropdownItem}
+                        >
+                          Đổi tên hội thoại
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConversationMenuId(null);
+                            handleDeleteConversation(c);
+                          }}
+                          className={styles.dropdownItemDanger}
+                        >
+                          Xóa hội thoại
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
           </div>
         )}
-        {sidebarCollapsed && <div style={{ flex: 1, minHeight: 16 }} />}
+        {sb && <div className={shell.sidebarFlexFill} />}
 
-        <div ref={settingsRef} style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid #1e293b', position: 'relative' }}>
+        <div ref={settingsRef} className={shell.settingsWrap}>
           <button
+            type="button"
             onClick={() => setSettingsMenuOpen(!settingsMenuOpen)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-              gap: '8px',
-              background: 'none',
-              border: 'none',
-              color: '#94a3b8',
-              fontSize: '14px',
-              cursor: 'pointer',
-              padding: sidebarCollapsed ? '0' : '8px 0',
-              width: sidebarCollapsed ? '40px' : '100%',
-              height: '40px',
-              minWidth: sidebarCollapsed ? '40px' : 'auto',
-              minHeight: '40px',
-              borderRadius: sidebarCollapsed ? '10px' : 0,
-            }}
+            className={`${shell.settingsBtn} ${sb ? shell.settingsBtnNarrow : ''}`}
             title="Cài đặt"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ flexShrink: 0 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={shell.iconShrink}>
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            {!sidebarCollapsed && 'Cài đặt'}
+            {!sb && 'Cài đặt'}
           </button>
 
           {settingsMenuOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 0,
-                left: '100%',
-                marginLeft: '8px',
-                minWidth: '220px',
-                background: '#1e293b',
-                border: '1px solid #334155',
-                borderRadius: '12px',
-                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-                padding: '8px 0',
-                zIndex: 1000,
-              }}
-            >
-              <Link
-                href="/dashboard/profile"
-                onClick={() => setSettingsMenuOpen(false)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '12px 16px',
-                  color: '#e2e8f0',
-                  fontSize: '14px',
-                  textDecoration: 'none',
-                }}
-              >
+            <div className={shell.settingsMenu}>
+              <Link href="/dashboard/profile" onClick={() => setSettingsMenuOpen(false)} className={shell.settingsMenuLink}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
                   <circle cx="12" cy="7" r="4" />
                 </svg>
                 Hồ sơ cá nhân
               </Link>
-              <Link
-                href="/dashboard/change-password"
-                onClick={() => setSettingsMenuOpen(false)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '12px 16px',
-                  color: '#e2e8f0',
-                  fontSize: '14px',
-                  textDecoration: 'none',
-                }}
-              >
+              <Link href="/dashboard/change-password" onClick={() => setSettingsMenuOpen(false)} className={shell.settingsMenuLink}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                 </svg>
                 Đổi mật khẩu
               </Link>
-              <button
-                onClick={() => { setSettingsMenuOpen(false); handleLogout(); }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  padding: '12px 16px',
-                  width: '100%',
-                  background: 'none',
-                  border: 'none',
-                  color: '#e2e8f0',
-                  fontSize: '14px',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                }}
-              >
+              <button type="button" onClick={() => { setSettingsMenuOpen(false); handleLogout(); }} className={shell.settingsMenuButton}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                   <polyline points="16 17 21 12 16 7" />
@@ -381,57 +396,48 @@ export default function Dashboard() {
         </div>
       </aside>
 
-      <main style={mainStyle}>
-        <div
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundImage: `
-              linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px)
-            `,
-            backgroundSize: '60px 60px',
-            pointerEvents: 'none',
-          }}
-        />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', width: '100%', overflow: 'hidden', position: 'relative', zIndex: 1 }}>
+      <main className={styles.main}>
+        <div className={styles.gridOverlay} aria-hidden />
+        <div className={styles.innerColumn}>
           {!activeConversationId ? (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <h1 style={{ fontSize: '28px', color: '#60a5fa', fontWeight: '500', textAlign: 'center' }}>
-                Chào bạn! Bấm &quot;Trò chuyện mới&quot; để bắt đầu.
-              </h1>
+            <div className={styles.welcomeWrap}>
+              <div className={styles.welcomeInner}>
+                <h1 className={styles.welcomeTitle}>Chào bạn! LegalAI có thể giúp gì cho bạn?</h1>
+                <p className={styles.welcomeSub}>
+                  Bạn có thể bấm &quot;Trò chuyện mới&quot; hoặc hỏi trực tiếp ở khung bên dưới.
+                </p>
+              </div>
             </div>
           ) : (
-            <div style={{ flex: 1, overflow: 'auto', padding: '0 8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className={styles.msgScroll}>
               {messages.map((m) => (
                 <div
                   key={m.messageId || m.createdAt + m.content?.slice(0, 20)}
-                  style={{
-                    alignSelf: m.senderType === 'USER' ? 'flex-end' : 'flex-start',
-                    maxWidth: '80%',
-                    padding: '12px 16px',
-                    borderRadius: '12px',
-                    background: m.senderType === 'USER' ? '#2563eb' : '#1e293b',
-                    color: '#f1f5f9',
-                    fontSize: '15px',
-                    lineHeight: 1.5,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
+                  className={m.senderType === 'USER' ? styles.msgUser : styles.msgAi}
                 >
-                  {m.content}
+                  {m.senderType === 'USER' ? (
+                    m.content
+                  ) : (
+                    <ChatAiMessage content={m.content} metadata={m.metadata} />
+                  )}
                 </div>
               ))}
+              {sending && (
+                <div className={styles.typingWrap}>
+                  <span className="typing-dots">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                </div>
+              )}
               <div ref={messagesEndRef} />
             </div>
           )}
 
-          <div style={{ position: 'relative', zIndex: 1, width: '100%', flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', background: '#1e293b', border: '1px solid #334155', borderRadius: '12px' }}>
+          <div className={styles.composerBlock}>
+            <div className={styles.composerRow}>
+              <div className={styles.inputShell}>
                 <input
                   type="text"
                   value={question}
@@ -439,10 +445,9 @@ export default function Dashboard() {
                   onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
                   placeholder="Đặt câu hỏi"
                   maxLength={500}
-                  disabled={!activeConversationId}
-                  style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#f1f5f9', fontSize: '15px' }}
+                  className={styles.textInput}
                 />
-                <button style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', padding: '2px', display: 'flex' }} title="Tải lên">
+                <button type="button" className={styles.attachBtn} title="Tải lên">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                     <polyline points="17 8 12 3 7 8" />
@@ -451,22 +456,10 @@ export default function Dashboard() {
                 </button>
               </div>
               <button
+                type="button"
                 onClick={handleSend}
-                disabled={!activeConversationId || sending || !question.trim()}
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  minWidth: '40px',
-                  borderRadius: '10px',
-                  background: '#2563eb',
-                  border: 'none',
-                  color: 'white',
-                  cursor: activeConversationId && !sending ? 'pointer' : 'not-allowed',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: activeConversationId && !sending ? 1 : 0.6,
-                }}
+                disabled={!sendButtonReady}
+                className={styles.sendBtn}
                 title="Gửi"
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -475,14 +468,180 @@ export default function Dashboard() {
                 </svg>
               </button>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '8px', padding: '0 4px' }}>
-              <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>LegalAI không lấy thông tin của người dùng để đào tạo AI model</p>
-              <span style={{ fontSize: '12px', color: '#64748b' }}>{question.length}/500</span>
+            <div className={styles.footerRow}>
+              <p className={styles.footerNote}>
+                LegalAI không lấy thông tin của người dùng để đào tạo AI model
+              </p>
+              <span className={styles.counter}>{question.length}/500</span>
             </div>
           </div>
         </div>
 
+        {showSubscriptionPaywall && (
+          <div className={styles.paywallBackdrop}>
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="paywall-title"
+              className={styles.paywallCard}
+            >
+              <div className={styles.paywallIntro}>
+                <div id="paywall-title" className={styles.paywallTitle}>
+                  Bạn cần mua gói để sử dụng LegalAI
+                </div>
+                <p className={styles.paywallText}>
+                  Gói <strong className={styles.paywallStrong}>1 tháng</strong> —{' '}
+                  <strong className={styles.paywallPrice}>10.000 đ/tháng</strong>. Quét mã VietQR bên dưới để thanh toán.
+                </p>
+              </div>
+              <div className={styles.qrBox}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src="/images/bidv-vietqr-payment.png"
+                  alt="Mã QR VietQR thanh toán gói LegalAI 1 tháng"
+                  className={styles.qrImg}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </main>
+
+      {confirmDelete.open && confirmDelete.conversation && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modalBox}>
+            <div className={styles.modalHead}>
+              <h2 className={styles.modalHeadTitle}>
+                Xóa chủ đề {confirmDelete.conversation.title || 'cuộc hội thoại'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete({ open: false, conversation: null })}
+                className={styles.iconClose}
+                aria-label="Đóng"
+              >
+                ×
+              </button>
+            </div>
+            <p className={styles.modalDesc}>
+              Bạn có chắc muốn xóa chủ đề này? Hành động này sẽ không thể hoàn tác.
+            </p>
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete({ open: false, conversation: null })}
+                className={styles.btnGhost}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const conv = confirmDelete.conversation;
+                  try {
+                    await chatAPI.deleteConversation(conv.conversationId);
+                    setConversations((prev) =>
+                      prev.filter((c) => c.conversationId !== conv.conversationId)
+                    );
+                    if (activeConversationId === conv.conversationId) {
+                      setActiveConversationId(null);
+                      setMessages([]);
+                    }
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setConfirmDelete({ open: false, conversation: null });
+                  }
+                }}
+                className={styles.btnDanger}
+              >
+                Xác nhận
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renameDialog.open && renameDialog.conversation && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.modalBox}>
+            <div className={styles.modalHead}>
+              <h2 className={styles.modalHeadTitle}>Đổi tên chủ đề</h2>
+              <button
+                type="button"
+                onClick={() => setRenameDialog({ open: false, conversation: null, title: '' })}
+                className={styles.iconClose}
+                aria-label="Đóng"
+              >
+                ×
+              </button>
+            </div>
+            <p className={styles.modalDescTight}>Nhập tên mới cho chủ đề này.</p>
+            <input
+              type="text"
+              value={renameDialog.title}
+              onChange={(e) =>
+                setRenameDialog((prev) => ({ ...prev, title: e.target.value }))
+              }
+              autoFocus
+              maxLength={100}
+              className={styles.renameInput}
+              onKeyDown={async (e) => {
+                if (e.key === 'Enter') {
+                  const title = renameDialog.title.trim();
+                  if (!title) return;
+                  try {
+                    const conv = renameDialog.conversation;
+                    const updated = await chatAPI.renameConversation(conv.conversationId, title);
+                    setConversations((prev) =>
+                      prev.map((c) =>
+                        c.conversationId === conv.conversationId ? { ...c, title: updated.title } : c
+                      )
+                    );
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setRenameDialog({ open: false, conversation: null, title: '' });
+                  }
+                }
+              }}
+              placeholder="Nhập tên chủ đề"
+            />
+            <div className={styles.modalActions}>
+              <button
+                type="button"
+                onClick={() => setRenameDialog({ open: false, conversation: null, title: '' })}
+                className={styles.btnGhost}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const title = renameDialog.title.trim();
+                  if (!title) return;
+                  try {
+                    const conv = renameDialog.conversation;
+                    const updated = await chatAPI.renameConversation(conv.conversationId, title);
+                    setConversations((prev) =>
+                      prev.map((c) =>
+                        c.conversationId === conv.conversationId ? { ...c, title: updated.title } : c
+                      )
+                    );
+                  } catch (err) {
+                    console.error(err);
+                  } finally {
+                    setRenameDialog({ open: false, conversation: null, title: '' });
+                  }
+                }}
+                className={styles.btnPrimary}
+              >
+                Lưu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

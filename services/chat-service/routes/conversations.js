@@ -3,6 +3,7 @@ const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const { authMiddleware } = require('../middleware/auth');
 const { getContextFromDocuments, generateReply } = require('../lib/rag');
+const Subscription = require('../models/Subscription');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -19,6 +20,13 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
+    const activeSub = await Subscription.findActiveByUserId(req.userId);
+    if (!activeSub) {
+      return res.status(403).json({
+        message: 'Bạn cần mua gói LegalAI còn hạn để tạo cuộc trò chuyện.',
+        active: false,
+      });
+    }
     const title = req.body.title || 'Cuộc hội thoại mới';
     const conv = await Conversation.create(req.userId, title);
     res.status(201).json(conv);
@@ -81,6 +89,18 @@ router.post('/:conversationId/messages', async (req, res) => {
     const conv = await Conversation.findById(req.params.conversationId, req.userId);
     if (!conv) return res.status(404).json({ message: 'Không tìm thấy cuộc hội thoại' });
     const type = senderType === 'AI' ? 'AI' : 'USER';
+
+    // Mọi tài khoản đều cần gói còn hạn (kể cả ADMIN) — admin cấp gói cho chính mình ở /admin nếu cần test chat.
+    if (type === 'USER') {
+      const activeSub = await Subscription.findActiveByUserId(req.userId);
+      if (!activeSub) {
+        return res.status(403).json({
+          message: 'Bạn cần mua gói LegalAI để tiếp tục chat (hết hạn hoặc chưa có gói).',
+          active: false,
+        });
+      }
+    }
+
     const msg = await Message.create(req.params.conversationId, content.trim(), type);
     await Conversation.touch(req.params.conversationId);
 
@@ -88,9 +108,10 @@ router.post('/:conversationId/messages', async (req, res) => {
       return res.status(201).json(msg);
     }
 
-    const context = await getContextFromDocuments(content.trim(), 5);
-    const aiContent = await generateReply(content.trim(), context);
-    const aiMsg = await Message.create(req.params.conversationId, aiContent, 'AI');
+    const { contextText, sources } = await getContextFromDocuments(content.trim(), 8);
+    const aiContent = await generateReply(content.trim(), contextText);
+    const metadata = sources.length > 0 ? { ragSources: sources } : null;
+    const aiMsg = await Message.create(req.params.conversationId, aiContent, 'AI', metadata);
     await Conversation.touch(req.params.conversationId);
     res.status(201).json({ userMessage: msg, aiMessage: aiMsg });
   } catch (error) {

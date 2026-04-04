@@ -1,0 +1,102 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.inner {
+  width: 100%;
+  max-width: 520px;
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.brand {
+  font-size: 34px;
+  font-weight: 900;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 6px;
+}
+
+.card {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 18px;
+  padding: 28px;
+}
+
+.errorBox {
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #fecaca;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.input {
+  width: 100%;
+  padding: 14px 16px;
+  background: #0b1220;
+  border: 1px solid #243247;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #f1f5f9;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.inputMb12 {
+  width: 100%;
+  padding: 14px 16px;
+  background: #0b1220;
+  border: 1px solid #243247;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #f1f5f9;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+}
+
+.inputMb16 {
+  width: 100%;
+  padding: 14px 16px;
+  background: #0b1220;
+  border: 1px solid #243247;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #f1f5f9;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 16px;
+}
+
+.submitBtn {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.submitBtn:disabled {
+  background: #334155;
+  cursor: not-allowed;
+}

@@ -1,4 +1,5 @@
 const express = require('express');
+const { mountListen } = require('../graceful-listen');
 const cors = require('cors');
 const passport = require('passport');
 const session = require('express-session');
@@ -42,12 +43,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 5001;
+const PORT = Number(process.env.PORT) || 5001;
 
 initDatabase()
   .then(() => connectRedis())
   .then((redis) => {
-    app.listen(PORT, () => {
+    mountListen(app, PORT, 'auth-service', () => {
       console.log(`Auth: http://localhost:${PORT} (Redis: session storage)`);
     });
   })

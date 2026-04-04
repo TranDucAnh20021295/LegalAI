@@ -4,28 +4,20 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import RegisterForm from '@/components/RegisterForm';
+import { getUserToken } from '@/lib/auth-storage';
+import styles from '../auth-page.module.css';
 
 export default function RegisterPage() {
   const router = useRouter();
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) router.push('/dashboard');
+    if (getUserToken()) router.push('/dashboard');
   }, [router]);
 
   return (
-    <main style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '32px' }}>
-      <Link href="/" style={{ textDecoration: 'none' }}>
-        <h1 style={{
-          position: 'relative',
-          zIndex: 1,
-          fontSize: '36px',
-          fontWeight: '700',
-          color: '#ffffff',
-          letterSpacing: '-0.02em',
-        }}>
-          LegalAI
-        </h1>
+    <main className={styles.main}>
+      <Link href="/" className={styles.brandLink}>
+        <h1 className={styles.brandTitle}>LegalAI</h1>
       </Link>
       <RegisterForm />
     </main>

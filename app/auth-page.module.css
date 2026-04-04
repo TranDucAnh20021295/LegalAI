@@ -1,0 +1,164 @@
+/* Khung trang login / register / forgot / reset */
+
+.main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 32px;
+}
+
+.brandLink {
+  text-decoration: none;
+}
+
+.brandTitle {
+  position: relative;
+  z-index: 1;
+  font-size: 36px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+/* Card: quên mật khẩu / đặt lại mật khẩu */
+
+.card {
+  position: relative;
+  z-index: 1;
+  background: #1e293b;
+  border-radius: 24px;
+  padding: 40px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  width: 100%;
+  max-width: 440px;
+  box-sizing: border-box;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 28px;
+}
+
+.cardHeading {
+  font-size: 24px;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0;
+}
+
+.cardClose {
+  color: #94a3b8;
+  font-size: 20px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.cardIntro {
+  font-size: 14px;
+  color: #94a3b8;
+  margin-bottom: 24px;
+}
+
+.alertError {
+  padding: 12px;
+  margin-bottom: 20px;
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.alertSuccess {
+  padding: 16px;
+  background: rgba(34, 197, 94, 0.2);
+  color: #86efac;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.successParagraph {
+  margin-bottom: 12px;
+}
+
+.linkBlueUnderline {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.inputDark {
+  width: 100%;
+  padding: 14px 16px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #f1f5f9;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.inputDarkMb16 {
+  width: 100%;
+  padding: 14px 16px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #f1f5f9;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 16px;
+}
+
+.inputDarkMb24 {
+  width: 100%;
+  padding: 14px 16px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #f1f5f9;
+  outline: none;
+  box-sizing: border-box;
+  margin-bottom: 24px;
+}
+
+.primaryBtn {
+  width: 100%;
+  padding: 14px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.primaryBtn:disabled {
+  background: #475569;
+  cursor: not-allowed;
+}
+
+.authFooter {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.authFooterLink {
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.successText {
+  color: #86efac;
+  margin-bottom: 16px;
+}

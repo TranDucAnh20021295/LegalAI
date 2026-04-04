@@ -1,9 +1,18 @@
 const OpenAI = require('openai');
 
-const OPENAI = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+const OPENAI_KEY_RAW = process.env.OPENAI_API_KEY || '';
+const OPENAI_KEY = typeof OPENAI_KEY_RAW === 'string' ? OPENAI_KEY_RAW.trim() : '';
+const OPENAI = OPENAI_KEY ? new OpenAI({ apiKey: OPENAI_KEY }) : null;
 const LOCAL_URL = process.env.EMBEDDING_LOCAL_URL || 'http://localhost:5004';
 const LOCAL_TIMEOUT_MS = Number(process.env.EMBEDDING_LOCAL_TIMEOUT_MS) || 600000; // 10 phút (batch 32 chunk có thể lâu)
-const PROVIDER = process.env.EMBEDDING_PROVIDER || (OPENAI ? 'openai' : 'local');
+/** Mặc định: có key → openai; không có key → local (embedding-service). */
+const PROVIDER = (process.env.EMBEDDING_PROVIDER || '').toLowerCase() === 'openai'
+  ? 'openai'
+  : (process.env.EMBEDDING_PROVIDER || '').toLowerCase() === 'local'
+    ? 'local'
+    : OPENAI
+      ? 'openai'
+      : 'local';
 
 const OPENAI_MODEL = 'text-embedding-3-small';
 const OPENAI_DIM = 1536;
@@ -160,4 +169,37 @@ async function getEmbeddingBatch(texts, opts = {}) {
   return list;
 }
 
-module.exports = { getEmbedding, getEmbeddingBatch, DIMENSIONS, isLocal: PROVIDER === 'local' };
+function getEmbeddingStatus() {
+  return {
+    provider: PROVIDER,
+    openaiKeySet: Boolean(OPENAI_KEY),
+    localUrl: LOCAL_URL,
+    dimensions: DIMENSIONS,
+  };
+}
+
+/** Gợi ý cấu hình khi getEmbedding trả null (hiển thị API / log). */
+function getEmbeddingFailureHint() {
+  if (PROVIDER === 'local') {
+    return (
+      `Đang dùng EMBEDDING_PROVIDER=local → cần chạy embedding-service tại ${LOCAL_URL}. ` +
+      'Trong thư mục services/embedding-service: pip install -r requirements.txt rồi python app.py. ' +
+      'Sau đó restart document-service. ' +
+      'Hoặc thêm OPENAI_API_KEY vào services/document-service/.env và đặt EMBEDDING_PROVIDER=openai.'
+    );
+  }
+  return (
+    'Đang dùng OpenAI embedding → cần OPENAI_API_KEY (OpenAI API, không dùng được GEMINI_API_KEY thay thế). ' +
+    'Đặt trong services/document-service/.env hoặc services/chat-service/.env rồi restart document-service. ' +
+    'Nếu chỉ có Gemini cho chat: thêm key OpenAI riêng cho embed, hoặc chạy embedding-service local (EMBEDDING_PROVIDER=local).'
+  );
+}
+
+module.exports = {
+  getEmbedding,
+  getEmbeddingBatch,
+  DIMENSIONS,
+  isLocal: PROVIDER === 'local',
+  getEmbeddingStatus,
+  getEmbeddingFailureHint,
+};

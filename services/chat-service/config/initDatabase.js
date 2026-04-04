@@ -43,6 +43,30 @@ const initDatabase = async () => {
     } catch (e) {
       if (e.code !== '42710') console.warn('[Chat] FK messages->conversations:', e.message);
     }
+
+    try {
+      await pool.query(`ALTER TABLE messages ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT NULL`);
+    } catch (e) {
+      console.warn('[Chat] messages.metadata column:', e.message);
+    }
+
+    // Subscription / Gói thời gian chat
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS chat_subscriptions (
+          "subscriptionId" CHAR(36) PRIMARY KEY,
+          "userId" CHAR(36) NOT NULL REFERENCES users("userId") ON DELETE CASCADE,
+          plan VARCHAR(20) NOT NULL,
+          "startsAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "endsAt" TIMESTAMP NOT NULL,
+          "createdAt" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_subscriptions_userId ON chat_subscriptions("userId")`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_chat_subscriptions_endsAt ON chat_subscriptions("endsAt")`);
+    } catch (e) {
+      console.warn('[Chat] subscription table:', e.message);
+    }
   } catch (error) {
     throw error;
   }

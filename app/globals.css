@@ -59,3 +59,65 @@ a {
 input::placeholder {
   color: #64748b;
 }
+
+/* Hiệu ứng 3 chấm trả lời trong chat */
+.typing-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background-color: #e5e7eb;
+  animation: typing-bounce 1s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* Chỉ hiện nút menu hội thoại khi hover */
+.conversation-item:hover .conversation-menu-btn {
+  opacity: 1 !important;
+}
+
+/* Thanh scroll mảnh, màu tối như thiết kế */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4b5563 #020617; /* thumb, track */
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #020617;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #4b5563;
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}

@@ -55,6 +55,20 @@ async function getAuthUserId(req) {
   return session ? session.userId : null;
 }
 
+async function requireAdmin(req, res, next) {
+  try {
+    const userId = await getAuthUserId(req);
+    if (!userId) return res.status(401).json({ message: 'Vui lòng đăng nhập' });
+    const user = await User.findById(userId);
+    if (!user) return res.status(401).json({ message: 'Người dùng không tồn tại' });
+    if (user.role !== 'ADMIN') return res.status(403).json({ message: 'Không có quyền' });
+    req.adminUser = user;
+    next();
+  } catch (e) {
+    return res.status(500).json({ message: 'Lỗi server' });
+  }
+}
+
 router.post('/register', async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
@@ -253,6 +267,83 @@ router.get('/me', async (req, res) => {
     });
   } catch (error) {
     res.status(401).json({ message: 'Token không hợp lệ' });
+  }
+});
+
+// Admin: quản lý active user
+router.get('/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const users = await User.findAll();
+    res.json(users);
+  } catch (error) {
+    console.error('[Auth][Admin] list users:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+router.patch('/admin/users/:userId/active', requireAdmin, async (req, res) => {
+  try {
+    const { active } = req.body || {};
+    if (typeof active !== 'boolean') {
+      return res.status(400).json({ message: 'Thiếu active (boolean)' });
+    }
+    const updated = await User.setActive(req.params.userId, active);
+    if (!updated) return res.status(404).json({ message: 'Không tìm thấy user' });
+    res.json(updated);
+  } catch (error) {
+    console.error('[Auth][Admin] set active:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+// Admin: cập nhật thông tin user (không áp dụng cho tài khoản ADMIN)
+router.patch('/admin/users/:userId', requireAdmin, async (req, res) => {
+  try {
+    const { fullName, email, password } = req.body || {};
+    const target = await User.findById(req.params.userId);
+    if (!target) return res.status(404).json({ message: 'Không tìm thấy user' });
+    if (target.role === 'ADMIN') {
+      return res.status(403).json({ message: 'Không thể chỉnh sửa tài khoản admin' });
+    }
+
+    const payload = {};
+    if (typeof fullName === 'string') {
+      const t = fullName.trim();
+      if (!t) return res.status(400).json({ message: 'Họ tên không được để trống' });
+      payload.fullName = t;
+    }
+    if (typeof email === 'string') {
+      const t = email.trim();
+      if (!t) return res.status(400).json({ message: 'Email không được để trống' });
+      const existing = await User.findByEmail(t);
+      if (existing && existing.userId !== req.params.userId) {
+        return res.status(400).json({ message: 'Email đã được sử dụng' });
+      }
+      payload.email = t;
+    }
+    if (typeof password === 'string' && password.length > 0) {
+      if (password.length < 6) {
+        return res.status(400).json({ message: 'Mật khẩu ít nhất 6 ký tự' });
+      }
+      payload.password = password;
+    }
+
+    if (Object.keys(payload).length === 0) {
+      return res.json({
+        userId: target.userId,
+        fullName: target.fullName,
+        email: target.email,
+        role: target.role,
+        loginProvider: target.loginProvider,
+        isActive: target.isActive,
+      });
+    }
+
+    const updated = await User.update(req.params.userId, payload);
+    res.json(updated);
+  } catch (error) {
+    console.error('[Auth][Admin] patch user:', error);
+    res.status(500).json({ message: 'Lỗi server' });
   }
 });
 

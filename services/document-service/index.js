@@ -1,10 +1,24 @@
+const path = require('path');
+const fs = require('fs');
+const dotenv = require('dotenv');
+
+// Cùng key OpenAI thường chỉ khai báo ở chat-service → merge để tra cứu AI/embed dùng được.
+// Thứ tự: .env gốc repo → chat-service/.env → document-service/.env (ưu tiên cuối).
+const rootEnv = path.join(__dirname, '../../.env');
+const chatEnvPath = path.join(__dirname, '../chat-service/.env');
+const docEnvPath = path.join(__dirname, '.env');
+if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv });
+if (fs.existsSync(chatEnvPath)) dotenv.config({ path: chatEnvPath });
+dotenv.config({ path: docEnvPath, override: true });
+
 const express = require('express');
+const { mountListen } = require('../graceful-listen');
 const cors = require('cors');
-require('dotenv').config();
 
 const initDatabase = require('./config/initDatabase');
 const documentRoutes = require('./routes/documents');
 const { runSync } = require('./lib/syncChunks');
+const { getEmbeddingStatus } = require('./lib/embedding');
 
 const app = express();
 
@@ -26,14 +40,15 @@ app.get('/health', (req, res) => {
   });
 });
 
-const PORT = process.env.PORT || 5002;
+const PORT = Number(process.env.PORT) || 5002;
 // Chỉ tự embed toàn bộ DB khi set AUTO_SYNC_CHUNKS_ON_STARTUP=true (mặc định tắt)
 const AUTO_SYNC = process.env.AUTO_SYNC_CHUNKS_ON_STARTUP === 'true';
 
 initDatabase()
   .then(() => {
-    app.listen(PORT, () => {
+    mountListen(app, PORT, 'document-service', () => {
       console.log(`Documents: http://localhost:${PORT}`);
+      console.log('[Embedding]', getEmbeddingStatus());
       if (AUTO_SYNC) {
         setImmediate(() => {
           console.log('[Document] Đang đồng bộ chunks + embedding (chạy nền)...');

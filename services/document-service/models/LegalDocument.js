@@ -16,9 +16,12 @@ class LegalDocument {
          OR "documentNumber" ILIKE $1
          OR content ILIKE $1
       ORDER BY
-        CASE WHEN title ILIKE $1 THEN 0
-             WHEN "documentType" ILIKE $1 OR field ILIKE $1 THEN 1
-             ELSE 2 END,
+        CASE
+          WHEN title ILIKE $1 THEN 0
+          WHEN "documentNumber" ILIKE $1 THEN 1
+          WHEN "documentType" ILIKE $1 OR field ILIKE $1 THEN 2
+          ELSE 3
+        END,
         "issueDate" DESC NULLS LAST
       LIMIT $2
     `;
