@@ -138,8 +138,6 @@ export default function HomePage() {
         activeCat={l.activeCat}
         filterCat={l.setActiveCat}
         catLabels={catLabels}
-        searchQuery={l.searchQuery}
-        clearSearch={() => l.setSearchQuery('')}
         openLaw={(law) => {
           if (law.documentId) {
             window.open(`/vbpl/${law.documentId}`, '_blank');
