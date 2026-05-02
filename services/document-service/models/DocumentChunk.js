@@ -15,13 +15,14 @@ class DocumentChunk {
     return { chunkId, documentId, contentChunk, chunkIndex };
   }
 
-  static async findByDocumentId(documentId) {
+  static async findByDocumentId(documentId, limit = 1000) {
     const result = await pool.query(
-      `SELECT "chunkId", "documentId", "contentChunk", "chunkIndex" FROM "${TABLE}" WHERE "documentId" = $1 ORDER BY "chunkIndex" ASC`,
-      [documentId]
+      `SELECT "chunkId", "documentId", "contentChunk", "chunkIndex" FROM "${TABLE}" WHERE "documentId" = $1 ORDER BY "chunkIndex" ASC LIMIT $2`,
+      [documentId, limit]
     );
     return result.rows;
   }
+
 
   static async updateEmbedding(chunkId, embedding, useLocal = false) {
     if (!embedding || !Array.isArray(embedding)) return;
@@ -46,23 +47,40 @@ class DocumentChunk {
   }
 
   /** Semantic search + metadata văn bản (cho UI tra cứu AI). */
-  static async searchSimilarWithDocuments(queryEmbedding, limit = 20, useLocal = false) {
+  static async searchSimilarWithDocuments(queryEmbedding, limit = 20, useLocal = false, documentId = null, field = null) {
     if (!queryEmbedding || !Array.isArray(queryEmbedding)) return [];
     const vectorSql = pgvector.toSql(queryEmbedding);
     const col = useLocal ? 'embedding_768' : 'embedding';
-    const result = await pool.query(
-      `SELECT dc."chunkId", dc."documentId", dc."contentChunk", dc."chunkIndex",
+    
+    let query = `SELECT dc."chunkId", dc."documentId", dc."contentChunk", dc."chunkIndex",
               1 - (dc."${col}" <=> $1::vector) AS similarity,
               ld.title, ld."documentNumber", ld."documentType", ld.field
        FROM "${TABLE}" dc
        INNER JOIN "${LEGAL_TABLE}" ld ON ld."documentId" = dc."documentId"
-       WHERE dc."${col}" IS NOT NULL
-       ORDER BY dc."${col}" <=> $1::vector
-       LIMIT $2`,
-      [vectorSql, limit]
-    );
+       WHERE dc."${col}" IS NOT NULL`;
+    
+    const params = [vectorSql];
+    let paramIndex = 2;
+
+    if (documentId) {
+      query += ` AND dc."documentId" = $${paramIndex}`;
+      params.push(documentId);
+      paramIndex++;
+    }
+    
+    if (field && field !== 'ALL' && field.trim() !== '') {
+      query += ` AND ld.field ILIKE $${paramIndex}`;
+      params.push(`%${field.trim()}%`);
+      paramIndex++;
+    }
+
+    query += ` ORDER BY dc."${col}" <=> $1::vector LIMIT $${paramIndex}`;
+    params.push(limit);
+
+    const result = await pool.query(query, params);
     return result.rows;
   }
+
 
   static async deleteByDocumentId(documentId) {
     await pool.query(`DELETE FROM "${TABLE}" WHERE "documentId" = $1`, [documentId]);

@@ -8,6 +8,11 @@ node_modules/
 !.env.local.example
 !**/.env.example
 
+# Project folders to ignore
+legal-crawler/
+scratch/
+**/scratch/
+
 # Next.js
 .next/
 out/

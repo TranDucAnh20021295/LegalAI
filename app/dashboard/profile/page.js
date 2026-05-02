@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { authAPI, chatAPI } from '@/lib/api';
 import { getUserToken } from '@/lib/auth-storage';
-import SettingsShell from '@/components/SettingsShell';
+import SettingsShell from '@/components/dashboard/SettingsShell';
 import styles from './page.module.css';
 
 const Section = ({ title, onEdit, children }) => (
@@ -80,16 +80,17 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const mounted = useRef(false);
+
   useEffect(() => {
-    if (!getUserToken()) {
-      router.push('/');
-      return;
-    }
-    authAPI
-      .getMe()
-      .then(setUser)
-      .catch(() => router.push('/'))
-      .finally(() => setLoading(false));
+    mounted.current = true;
+    const token = getUserToken();
+    if (!token) { router.replace('/'); return; }
+    authAPI.getMe()
+      .then((u) => { if (mounted.current) setUser(u); })
+      .catch(() => router.replace('/'))
+      .finally(() => { if (mounted.current) setLoading(false); });
+    return () => { mounted.current = false; };
   }, [router]);
 
   useEffect(() => {

@@ -33,6 +33,20 @@ const initDatabase = async () => {
   } catch (e) {
     if (e.code !== '42701') console.warn('[Document] embedding_768 column:', e.message);
   }
+
+  // --- HNSW Indexes for Vector Search Performance ---
+  try {
+    // Index cho OpenAI (1536 dimensions)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hnsw_embedding ON "DocumentChunks" USING hnsw (embedding vector_cosine_ops)`);
+  } catch (e) {
+    console.warn('[Document] HNSW index (1536) failed:', e.message);
+  }
+  try {
+    // Index cho Local SBERT (768 dimensions)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hnsw_embedding_768 ON "DocumentChunks" USING hnsw (embedding_768 vector_cosine_ops)`);
+  } catch (e) {
+    console.warn('[Document] HNSW index (768) failed:', e.message);
+  }
 };
 
 module.exports = initDatabase;

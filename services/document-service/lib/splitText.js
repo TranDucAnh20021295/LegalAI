@@ -1,26 +1,69 @@
-function splitTextIntoChunks(text, chunkSize, overlap) {
+function splitTextIntoChunks(text, chunkSize = 1500, overlap = 200) {
   if (!text || typeof text !== 'string') return [];
-  const size = chunkSize || 600;
-  const ov = overlap || 100;
   const cleaned = text.trim();
   if (!cleaned) return [];
+  
+  // Tách theo xuống dòng (\n) hoặc dấu câu (. ! ?) có kèm khoảng trắng/xuống dòng
+  // Cách này đảm bảo không cắt ngang giữa câu (trừ khi một câu quá dài)
+  const segments = cleaned.match(/[^.!?\n]+[.!?\n]*/g) || [cleaned];
+  
   const chunks = [];
-  let start = 0;
-  while (start < cleaned.length) {
-    let end = start + size;
-    if (end < cleaned.length) {
-      const slice = cleaned.slice(start, end);
-      const lastSpace = slice.lastIndexOf(' ');
-      const lastNewline = slice.lastIndexOf('\n');
-      const breakAt = Math.max(lastSpace, lastNewline, Math.floor(slice.length * 0.8));
-      if (breakAt > size / 2) end = start + breakAt + 1;
+  let currentChunk = [];
+  let currentLength = 0;
+
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i].trim();
+    if (!s) continue;
+    
+    // Nếu một câu / đoạn quá dài so với chunkSize thì bắt buộc phải cắt cứng
+    if (s.length > chunkSize) {
+      if (currentChunk.length > 0) {
+        chunks.push(currentChunk.join('\n'));
+        currentChunk = [];
+        currentLength = 0;
+      }
+      let start = 0;
+      while (start < s.length) {
+        let end = start + chunkSize;
+        // Lùi lại tìm dấu cách gần nhất để cắt cho đẹp chữ
+        if (end < s.length) {
+           const spaceIdx = s.lastIndexOf(' ', end);
+           if (spaceIdx > start + chunkSize / 2) end = spaceIdx;
+        }
+        chunks.push(s.slice(start, end).trim());
+        start = end - overlap;
+        if (start >= s.length) break;
+      }
+      continue;
     }
-    const chunk = cleaned.slice(start, end).trim();
-    if (chunk) chunks.push(chunk);
-    start = end - ov;
-    if (start >= cleaned.length) break;
+
+    if (currentLength + s.length + 1 > chunkSize && currentChunk.length > 0) {
+      chunks.push(currentChunk.join('\n'));
+      
+      // Giữ lại phần overlap từ các câu cuối của chunk trước
+      let overlapLength = 0;
+      const overlapChunk = [];
+      for (let j = currentChunk.length - 1; j >= 0; j--) {
+        if (overlapLength + currentChunk[j].length <= overlap) {
+          overlapChunk.unshift(currentChunk[j]);
+          overlapLength += currentChunk[j].length + 1;
+        } else {
+          break;
+        }
+      }
+      currentChunk = [...overlapChunk, s];
+      currentLength = overlapLength + s.length + 1;
+    } else {
+      currentChunk.push(s);
+      currentLength += s.length + 1;
+    }
   }
-  return chunks;
+
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk.join('\n'));
+  }
+
+  return chunks.map(c => c.trim()).filter(Boolean);
 }
 
 module.exports = { splitTextIntoChunks };

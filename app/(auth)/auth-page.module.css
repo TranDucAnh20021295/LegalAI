@@ -1,0 +1,175 @@
+/* ============================================
+   Auth Layout — White/Green Theme
+   ============================================ */
+
+.authLayoutRoot {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f8fdf9;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+.authLayoutHeader {
+  padding: 40px 40px 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.brandLink {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-decoration: none;
+}
+
+.logoIcon {
+  width: 48px;
+  height: 48px;
+  background: linear-gradient(135deg, #00a651, #007a3d);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 800;
+  font-size: 24px;
+}
+
+.brandTitle {
+  font-size: 32px;
+  font-weight: 800;
+  color: #007a3d;
+  letter-spacing: -0.02em;
+}
+
+.authLayoutContent {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.authLayoutFooter {
+  padding: 32px;
+  text-align: center;
+  font-size: 14px;
+  color: #9ca3af;
+}
+
+/* Base Card for sub-pages */
+.card {
+  background: white;
+  border-radius: 24px;
+  padding: 40px;
+  box-shadow: 0 10px 40px rgba(0, 166, 81, 0.08), 0 1px 3px rgba(0,0,0,0.02);
+  width: 100%;
+  max-width: 440px;
+  border: 1px solid #e5e7eb;
+}
+
+.cardHeading {
+  font-size: 24px;
+  font-weight: 700;
+  color: #1a1a2e;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.cardIntro {
+  font-size: 14px;
+  color: #6b7280;
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+/* Alerts */
+.alertError {
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  background: #fff1f2;
+  border: 1px solid #fecaca;
+  color: #e11d48;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.alertSuccess {
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  background: #e6f7ef;
+  border: 1px solid #a7f3d0;
+  color: #007a3d;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+/* Inputs (Legacy names kept for compatibility but styles updated) */
+.inputDark, .inputDarkMb16, .inputDarkMb24 {
+  width: 100%;
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 12px;
+  font-size: 15px;
+  color: #1a1a2e;
+  outline: none;
+  transition: border-color 0.2s;
+  box-sizing: border-box;
+}
+
+.inputDark:focus, .inputDarkMb16:focus, .inputDarkMb24:focus {
+  border-color: #00a651;
+}
+
+.inputDarkMb16 { margin-bottom: 16px; }
+.inputDarkMb24 { margin-bottom: 24px; }
+
+.primaryBtn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #00a651, #007a3d);
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.primaryBtn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,166,81,0.25);
+}
+
+.primaryBtn:disabled {
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.authFooter {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 14px;
+  color: #6b7280;
+}
+
+.authFooterLink {
+  color: #00a651;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.authFooterLink:hover {
+  text-decoration: underline;
+}
+
+.linkBlueUnderline {
+  color: #00a651;
+  text-decoration: underline;
+}

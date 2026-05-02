@@ -34,6 +34,8 @@ app.use('/api/auth', createProxyMiddleware({
 app.use('/api/documents', createProxyMiddleware({
   target: DOCUMENT_SERVICE_URL,
   changeOrigin: true,
+  proxyTimeout: 300000,
+  timeout: 300000,
   pathRewrite: { '^/api/documents': '/documents' },
   onError: (err, req, res) => {
     const msg = err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET'
@@ -46,6 +48,8 @@ app.use('/api/documents', createProxyMiddleware({
 app.use('/api/chat', createProxyMiddleware({
   target: CHAT_SERVICE_URL,
   changeOrigin: true,
+  proxyTimeout: 300000,
+  timeout: 300000,
   pathRewrite: { '^/api/chat': '' },
   onError: (err, req, res) => {
     const msg = err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET' ? 'Chat Service chưa chạy.' : 'Service temporarily unavailable';

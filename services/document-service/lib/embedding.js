@@ -20,6 +20,10 @@ const LOCAL_DIM = 768;
 
 const DIMENSIONS = PROVIDER === 'local' ? LOCAL_DIM : OPENAI_DIM;
 
+// --- Cache cho Embedding để tránh gọi service quá nhiều ---
+const embeddingCache = new Map();
+const MAX_CACHE_SIZE = 1000;
+
 async function getEmbeddingOpenAI(text) {
   if (!OPENAI || !text || typeof text !== 'string') return null;
   const input = text.trim().slice(0, 8000);
@@ -37,7 +41,7 @@ async function getEmbeddingOpenAI(text) {
   }
 }
 
-const BATCH_SIZE = 16;
+const BATCH_SIZE = 100;
 // Local: gửi toàn bộ từng đợt (tối đa 32/request theo giới hạn embedding-service)
 const LOCAL_BATCH_SIZE = PROVIDER === 'local' ? 32 : Math.max(1, Number(process.env.EMBEDDING_LOCAL_BATCH_SIZE) || 16);
 const LOCAL_RETRIES = Math.max(0, Number(process.env.EMBEDDING_LOCAL_RETRIES) || 3);
@@ -139,11 +143,27 @@ async function getEmbeddingOpenAIBatch(texts) {
 }
 
 async function getEmbedding(text) {
-  if (PROVIDER === 'local') return getEmbeddingLocal(text);
-  return getEmbeddingOpenAI(text);
+  if (!text || typeof text !== 'string') return null;
+  const q = text.trim();
+  if (!q) return null;
+
+  if (embeddingCache.has(q)) return embeddingCache.get(q);
+
+  let res;
+  if (PROVIDER === 'local') res = await getEmbeddingLocal(q);
+  else res = await getEmbeddingOpenAI(q);
+
+  if (res) {
+    if (embeddingCache.size >= MAX_CACHE_SIZE) {
+       const firstKey = embeddingCache.keys().next().value;
+       embeddingCache.delete(firstKey);
+    }
+    embeddingCache.set(q, res);
+  }
+  return res;
 }
 
-const BATCH_DELAY_MS = Math.max(0, Number(process.env.EMBEDDING_BATCH_DELAY_MS) || 500);
+const BATCH_DELAY_MS = Math.max(0, Number(process.env.EMBEDDING_BATCH_DELAY_MS) || 50);
 const LOCAL_BATCH_DELAY_MS = Math.max(0, Number(process.env.EMBEDDING_LOCAL_BATCH_DELAY_MS) || 1500);
 
 /**

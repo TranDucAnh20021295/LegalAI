@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { authAPI } from '@/lib/api';
 import { getUserToken, clearUserToken } from '@/lib/auth-storage';
-import SettingsShell from '@/components/SettingsShell';
+import SettingsShell from '@/components/dashboard/SettingsShell';
 import styles from './page.module.css';
 
 const PasswordInput = ({ value, onChange, placeholder, ...props }) => {
@@ -51,27 +51,33 @@ export default function ChangePasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  const mounted = useRef(false);
 
   useEffect(() => {
-    if (!getUserToken()) {
-      router.push('/');
+    // Guard runs only after hydration (localStorage available)
+    mounted.current = true;
+    const token = getUserToken();
+    if (!token) {
+      router.replace('/');
       return;
     }
     const fetchUser = async () => {
       try {
         const userData = await authAPI.getMe();
+        if (!mounted.current) return;
         setUser(userData);
         if (userData.loginProvider !== 'LOCAL') {
-          setError('Tài khoản đăng nhập Google không thể đổi mật khẩu');
+          setError('Tài khoản đăng nhập Google không thể đổi mật khẩu trực tiếp.');
         }
       } catch (err) {
         clearUserToken();
-        router.push('/');
+        router.replace('/');
       } finally {
-        setLoading(false);
+        if (mounted.current) setLoading(false);
       }
     };
     fetchUser();
+    return () => { mounted.current = false; };
   }, [router]);
 
   const handleSubmit = async (e) => {

@@ -11,6 +11,7 @@ const pool = new Pool({
 });
 
 pool.on('connect', (client) => {
+  console.log(`[Document DB] Connected to ${pool.options.host}:${pool.options.port}/${pool.options.database}`);
   try {
     pgvector.registerTypes(client);
   } catch (e) {}

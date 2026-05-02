@@ -1,0 +1,94 @@
+.sidebar {
+  width: 280px;
+  min-width: 280px;
+  background: #ffffff;
+  border-right: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 16px;
+  transition: all 0.2s ease;
+  height: 100vh;
+}
+
+.sidebarNarrow { width: 64px; min-width: 64px; padding: 16px 8px; }
+
+.sidebarHeader { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+.sidebarHeaderNarrow { justify-content: center; }
+
+.brandLink {
+  display: flex; align-items: center; gap: 8px; font-size: 20px;
+  font-weight: 800; color: #007a3d; text-decoration: none;
+}
+
+.logoIcon {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: linear-gradient(135deg, #00a651, #007a3d);
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 16px;
+}
+
+.collapseBtn {
+  width: 36px; height: 36px; border-radius: 10px; border: 1px solid #e5e7eb;
+  background: transparent; color: #9ca3af; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+}
+.collapseBtn:hover { border-color: #00a651; color: #00a651; }
+
+.sideNavItem {
+  width: 100%; height: 44px; background: linear-gradient(135deg, #00a651, #007a3d);
+  border: none; border-radius: 12px; color: white;
+  font-weight: 600; display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; cursor: pointer; margin-bottom: 20px;
+}
+.sideNavItemNarrow { padding: 0; justify-content: center; }
+
+.historySection { flex: 1; overflow-y: auto; margin-bottom: 20px; }
+.historyLabel { font-size: 11px; color: #9ca3af; text-transform: uppercase; font-weight: 700; margin-bottom: 10px; }
+
+.convList { display: flex; flex-direction: column; gap: 4px; }
+.convItem { position: relative; }
+
+.convLink {
+  width: 100%; text-align: left; padding: 10px; border-radius: 8px;
+  font-size: 14px; color: #374151; background: transparent; border: none;
+  cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.convLink:hover { background: #f0fdf4; color: #00a651; }
+.convLinkActive { background: #e6f7ef !important; color: #00a651 !important; font-weight: 600; }
+
+.convActions {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  display: flex; gap: 4px; padding-left: 20px; background: linear-gradient(90deg, transparent, #e6f7ef 30%);
+}
+.convActions button { background: none; border: none; cursor: pointer; font-size: 12px; opacity: 0.7; }
+.convActions button:hover { opacity: 1; }
+
+.settingsWrap { position: relative; border-top: 1px solid #f3f4f6; padding-top: 16px; }
+.settingsBtn {
+  width: 100%; display: flex; align-items: center; gap: 10px;
+  padding: 10px; border-radius: 12px; border: 1px solid #e5e7eb;
+  background: #fcfdfc; cursor: pointer; text-align: left;
+}
+.settingsBtnNarrow { border: none; background: none; padding: 0; justify-content: center; }
+
+.userAvatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: linear-gradient(135deg, #00a651, #007a3d);
+  display: flex; align-items: center; justify-content: center; color: white; font-weight: 700;
+}
+
+.settingsMenu {
+  position: absolute; bottom: 100%; left: 0; right: 0; background: white;
+  border-radius: 12px; border: 1px solid #e5e7eb; box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+  margin-bottom: 12px; overflow: hidden;
+}
+.menuLink, .menuBtnLogout {
+  display: block; width: 100%; padding: 12px 16px; text-decoration: none;
+  font-size: 14px; color: #374151; text-align: left; border: none; background: none;
+  cursor: pointer;
+}
+.menuLink:hover { background: #f0fdf4; color: #00a651; }
+.menuBtnLogout:hover { background: #fff1f2; color: #ef4444; }
+
+.chevron { transition: transform 0.2s; }
+.chevronRotated { transform: rotate(180deg); }

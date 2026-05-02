@@ -1,0 +1,117 @@
+.calcOverlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55); backdrop-filter: blur(4px);
+  z-index: 700; display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+
+.calcModal {
+  background: white; border-radius: 20px; width: 100%; max-width: 720px;
+  max-height: 90vh; overflow-y: auto; box-shadow: 0 24px 80px rgba(0,0,0,0.25);
+  animation: modalIn .3s cubic-bezier(.34,1.56,.64,1);
+}
+
+@keyframes modalIn { from{opacity:0;transform:scale(.92) translateY(20px)} to{opacity:1;transform:scale(1) translateY(0)} }
+
+.calcModal::-webkit-scrollbar { width: 4px; }
+.calcModal::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 4px; }
+
+.calcHeader {
+  background: linear-gradient(135deg, #007a3d, #00a651);
+  padding: 24px 28px; border-radius: 20px 20px 0 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+.calcHeaderLeft { display: flex; align-items: center; gap: 14px; }
+
+.calcHeaderIcon {
+  width: 48px; height: 48px; background: rgba(255,255,255,0.2);
+  border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px;
+}
+
+.calcTitle { color: white; font-size: 20px; font-weight: 800; margin: 0; }
+
+.calcSubtitle { color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 2px; }
+
+.calcCloseBtn {
+  width: 36px; height: 36px; border-radius: 50%; background: rgba(255,255,255,0.2);
+  border: none; cursor: pointer; color: white; font-size: 20px; display: flex;
+  align-items: center; justify-content: center; transition: background .2s;
+}
+
+.calcCloseBtn:hover { background: rgba(255,255,255,0.35); }
+
+.lawBadge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #fff8e1; color: #b45309; border: 1.5px solid #fde68a;
+  padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  margin: 16px 28px 0;
+}
+
+.calcBody { padding: 24px 28px; }
+
+.formRow { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+
+.formGroup label { display: block; font-size: 13px; font-weight: 600; color: #1a1a2e; margin-bottom: 6px; }
+
+.hint { font-weight: 400; color: #6b7280; font-size: 12px; }
+
+.calcInput {
+  width: 100%; padding: 11px 14px; border: 1.5px solid #e5e7eb; border-radius: 10px;
+  font-family: inherit; font-size: 14px; color: #1a1a2e; outline: none;
+  transition: border-color .2s; background: #fafafa;
+}
+
+.calcInput:focus { border-color: #00a651; background: white; }
+
+.inputAddon { display: flex; align-items: center; }
+.inputAddon .calcInput { border-radius: 10px 0 0 10px; border-right: none; }
+.inputUnit {
+  padding: 11px 14px; background: #f3f4f6; border: 1.5px solid #e5e7eb;
+  border-radius: 0 10px 10px 0; font-size: 13px; color: #6b7280;
+  font-weight: 600; white-space: nowrap;
+}
+
+.radioGroup { display: flex; gap: 12px; }
+.radioBtn {
+  flex: 1; padding: 10px; border-radius: 10px; border: 1.5px solid #e5e7eb;
+  cursor: pointer; text-align: center; font-size: 13px; font-weight: 600;
+  color: #6b7280; transition: all .2s; font-family: inherit; background: white;
+}
+.radioBtnActive { border-color: #00a651 !important; background: #e6f7ef !important; color: #00a651 !important; }
+
+.calcBtn {
+  width: 100%; padding: 14px; border-radius: 12px; border: none;
+  background: linear-gradient(135deg, #00a651, #007a3d); color: white;
+  font-size: 16px; font-weight: 800; font-family: inherit; cursor: pointer;
+  transition: all .2s; margin-top: 4px;
+}
+.calcBtn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(0,166,81,0.3); }
+
+.resultSection { margin-top: 24px; border-top: 2px dashed #e5e7eb; padding-top: 20px; }
+.resultSummary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+.resCardPrimary { border-radius: 12px; padding: 16px; text-align: center; background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 2px solid #bdf1d2; }
+.resCardSuccess { border-radius: 12px; padding: 16px; text-align: center; background: #e6f7ef; border: 2px solid #a7f3d0; }
+.resCardInfo { border-radius: 12px; padding: 16px; text-align: center; background: #eff6ff; border: 2px solid #bfdbfe; }
+.resCardLabel { font-size: 11px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.resCardValue { font-size: 18px; font-weight: 800; }
+.deductionBreakdown { background: #f9fafb; border-radius: 10px; padding: 14px 16px; margin-top: 16px; }
+.deductionRow { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #e5e7eb; }
+.deductionRow:last-child { border-bottom: none; padding-top: 8px; margin-top: 4px; border-top: 2px solid #e5e7eb; }
+.deductionLabel { color: #6b7280; }
+.deducMinus { font-weight: 700; color: #e53e3e; }
+.deducResult { font-weight: 700; color: #00a651; font-size: 14px; }
+.bracketTable { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 20px; }
+.bracketTable th { background: #f9fafb; padding: 10px 14px; text-align: left; font-weight: 700; font-size: 12px; color: #6b7280; border-bottom: 2px solid #e5e7eb; }
+.bracketTable td { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; }
+.bracketTable tr:last-child td { border-bottom: none; }
+.activeRow td { background: #e6f7ef !important; font-weight: 600; }
+.activeRowFirst { border-left: 3px solid #00a651; }
+.taxAmount { font-weight: 700; color: #007a3d; }
+.noteBox {
+  background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px;
+  padding: 12px 16px; margin-top: 16px; font-size: 12.5px; color: #1e40af; line-height: 1.6;
+}
+
+@media (max-width: 600px) {
+  .formRow { grid-template-columns: 1fr; }
+  .resultSummary { grid-template-columns: 1fr; }
+}

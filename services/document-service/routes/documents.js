@@ -71,7 +71,7 @@ router.post('/index-all', async (req, res) => {
 
 router.get('/search/semantic', async (req, res) => {
   try {
-    const { q, limit } = req.query;
+    const { q, limit, documentId, field } = req.query;
     if (!q || typeof q !== 'string') {
       return res.status(400).json({ message: 'Thiếu tham số q' });
     }
@@ -85,18 +85,47 @@ router.get('/search/semantic', async (req, res) => {
       });
     }
     const lim = parseInt(limit, 10) || 20;
-    const chunks = await DocumentChunk.searchSimilarWithDocuments(embedding, lim, isLocal);
+    const chunks = await DocumentChunk.searchSimilarWithDocuments(embedding, lim, isLocal, documentId, field);
     res.json({
       chunks,
-      meta: { queryEmbedded: true, count: chunks.length, mode: 'semantic' },
+      meta: { queryEmbedded: true, count: chunks.length, mode: 'semantic', documentId, field },
     });
+
   } catch (error) {
     console.error('[Documents] semantic search error:', error);
     res.status(500).json({ message: 'Lỗi server', queryEmbedded: false });
   }
 });
 
+router.get('/search/semantic/docs', async (req, res) => {
+  try {
+    const { q, limit } = req.query;
+    if (!q || typeof q !== 'string') return res.status(400).json({ message: 'Thiếu q' });
+    const embedding = await getEmbedding(q);
+    if (!embedding) return res.status(503).json({ message: 'Lỗi embedding', ...getEmbeddingStatus() });
+    const docs = await LegalDocument.searchSemantic(embedding, parseInt(limit, 10) || 24, isLocal);
+    res.json(docs);
+  } catch (error) {
+    console.error('[Documents] semantic docs search error:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+router.get('/chunks', async (req, res) => {
+  try {
+    const { documentId, limit } = req.query;
+    if (!documentId) return res.status(400).json({ message: 'Thiếu documentId' });
+    const lim = parseInt(limit, 10) || 60;
+    const chunks = await DocumentChunk.findByDocumentId(documentId, lim);
+    res.json(chunks);
+  } catch (error) {
+    console.error('[Documents] get chunks by documentId error:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
 router.post('/chunks/index', async (req, res) => {
+
   try {
     const { documentId } = req.body;
     if (!documentId) {
@@ -123,8 +152,14 @@ router.post('/chunks/index', async (req, res) => {
 
 router.get('/search', async (req, res) => {
   try {
-    const { keyword, limit } = req.query;
-    const results = await LegalDocument.searchByKeyword(keyword || '', parseInt(limit, 10) || 50);
+    const { keyword, limit, searchIn, exact } = req.query;
+    const isExact = exact === 'true';
+    const results = await LegalDocument.searchByKeyword(
+      keyword || '', 
+      parseInt(limit, 10) || 50,
+      searchIn || 'all',
+      isExact
+    );
     res.json(results);
   } catch (error) {
     console.error('[Documents] searchByKeyword error:', error);
@@ -153,6 +188,34 @@ router.get('/:documentId', async (req, res) => {
     res.json(doc);
   } catch (error) {
     console.error('[Documents] viewDetail error:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+router.put('/:documentId', async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    const updated = await LegalDocument.update(documentId, req.body);
+    if (!updated) {
+      return res.status(404).json({ message: 'Không tìm thấy văn bản' });
+    }
+    res.json({ message: 'Cập nhật thành công', document: updated });
+  } catch (error) {
+    console.error('[Documents] update error:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+router.delete('/:documentId', async (req, res) => {
+  try {
+    const { documentId } = req.params;
+    const deleted = await LegalDocument.delete(documentId);
+    if (!deleted) {
+      return res.status(404).json({ message: 'Không tìm thấy văn bản' });
+    }
+    res.json({ message: 'Đã xóa văn bản' });
+  } catch (error) {
+    console.error('[Documents] delete error:', error);
     res.status(500).json({ message: 'Lỗi server' });
   }
 });

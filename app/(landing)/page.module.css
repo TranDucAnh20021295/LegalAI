@@ -1,0 +1,6 @@
+/* Root wrapper for the landing page */
+.pageRoot {
+  min-height: 100vh;
+  background: #f8fdf9;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}

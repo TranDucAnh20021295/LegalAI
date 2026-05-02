@@ -56,6 +56,6 @@ def embed():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5004))
-    print(f"[Embedding] Khởi động, load model trước khi lắng nghe...")
+    print(f"[Embedding] Starting server on port {port}...")
     get_model()
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=True, threaded=True)

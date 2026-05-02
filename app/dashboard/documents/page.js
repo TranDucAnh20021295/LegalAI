@@ -8,11 +8,39 @@ import { getUserToken, clearUserToken } from '@/lib/auth-storage';
 import shell from '../dashboard-shell.module.css';
 import styles from './page.module.css';
 
+function parseMarkdownToHtml(text) {
+  if (!text) return '';
+  let s = String(text);
+  // Nếu đã có tag HTML thì pass-through, không double-encode
+  // Chỉ xử lý Markdown bên ngoài thẻ HTML
+  const parts = [];
+  const tagRe = /(<(?:table|tr|td|th|tbody|thead|colgroup|col|p|ul|ol|li|div|br|hr|h[1-6]|strong|em|span)[^>]*>[\s\S]*?<\/(?:table|tr|td|th|tbody|thead|colgroup|p|ul|ol|li|div|h[1-6]|strong|em|span)>|<br\s*\/?>|<hr\s*\/>)/gi;
+  let lastIndex = 0;
+  let match;
+  while ((match = tagRe.exec(s)) !== null) {
+    if (match.index > lastIndex) parts.push({ type: 'md', text: s.slice(lastIndex, match.index) });
+    parts.push({ type: 'html', text: match[0] });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < s.length) parts.push({ type: 'md', text: s.slice(lastIndex) });
+
+  return parts.map(({ type, text: t }) => {
+    if (type === 'html') return t;
+    let m = t;
+    m = m.replace(/^(#{1,6})\s+(.*)$/gm, (_, hashes, content) => `<h${hashes.length} style="color:#e2e8f0;margin:1em 0 .5em;font-weight:700">${content}</h${hashes.length}>`);
+    m = m.replace(/\*\*([\s\S]*?)\*\*/g, '<strong>$1</strong>');
+    m = m.replace(/\*([^\*\n]+?)\*/g, '<em>$1</em>');
+    m = m.replace(/\n/g, '<br>');
+    return m;
+  }).join('');
+}
+
 export default function DocumentsPage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [keyword, setKeyword] = useState('');
+  const [searchIn, setSearchIn] = useState('title');
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -21,6 +49,7 @@ export default function DocumentsPage() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const settingsRef = useRef(null);
+  const abortRef = useRef(null);
   const [conversations, setConversations] = useState([]);
 
   useEffect(() => {
@@ -41,18 +70,52 @@ export default function DocumentsPage() {
     chatAPI.listConversations().then(setConversations).catch(() => setConversations([]));
   }, [user]);
 
-  const handleSearch = async () => {
+  // Live search theo debounce
+  useEffect(() => {
     const q = keyword.trim();
-    if (!q) {
-      setSearchError('Vui lòng nhập nội dung cần tra cứu.');
+    if (!q || q.length < 2) {
       setResults([]);
+      setTouchedSearch(false);
       return;
     }
+    if (abortRef.current) abortRef.current.abort();
+    abortRef.current = new AbortController();
+    setSearching(true);
+    setTouchedSearch(true);
+    setSearchError('');
+    const timer = setTimeout(async () => {
+      try {
+        const rows = await documentAPI.search(q, 50, searchIn, false, { signal: abortRef.current?.signal });
+        const list = Array.isArray(rows) ? rows : [];
+        setResults(
+          list.map((d) => ({
+            rowKey: d.documentId,
+            documentId: d.documentId,
+            title: d.title,
+            documentNumber: d.documentNumber,
+            documentType: d.documentType,
+            field: d.field,
+          }))
+        );
+      } catch (err) {
+        if (err.name === 'CanceledError' || err.name === 'AbortError') return;
+        setResults([]);
+        setSearchError(err.response?.data?.message || 'Không thể tra cứu. Thử lại sau.');
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [keyword, searchIn]);
+
+  const handleSearch = async () => {
+    const q = keyword.trim();
+    if (!q) { setSearchError('Vui lòng nhập nội dung cần tra cứu.'); setResults([]); return; }
     setSearchError('');
     setTouchedSearch(true);
     setSearching(true);
     try {
-      const rows = await documentAPI.search(q, 50);
+      const rows = await documentAPI.search(q, 50, searchIn);
       const list = Array.isArray(rows) ? rows : [];
       setResults(
         list.map((d) => ({
@@ -62,7 +125,6 @@ export default function DocumentsPage() {
           documentNumber: d.documentNumber,
           documentType: d.documentType,
           field: d.field,
-          contentPreview: d.contentPreview || '',
         }))
       );
     } catch (err) {
@@ -218,12 +280,22 @@ export default function DocumentsPage() {
               setSearchError('');
             }}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder="Ví dụ: luật…"
+            placeholder={searchIn === 'title' ? 'Nhập tiêu đề văn bản...' : 'Nhập số hiệu (vd: 109/2025/QH15)...'}
             className={styles.searchInput}
           />
           <button type="button" onClick={handleSearch} disabled={searching} className={styles.searchBtn}>
-            {searching ? 'Đang tra cứu...' : 'Tra cứu đi'}
+            {searching ? 'Đang tìm...' : 'Tìm kiếm'}
           </button>
+        </div>
+        <div className={styles.searchFilters}>
+          <label className={styles.filterOption}>
+            <input type="radio" name="adminSearchIn" value="title" checked={searchIn === 'title'} onChange={() => setSearchIn('title')} />
+            Tiêu đề văn bản
+          </label>
+          <label className={styles.filterOption}>
+            <input type="radio" name="adminSearchIn" value="number" checked={searchIn === 'number'} onChange={() => setSearchIn('number')} />
+            Số hiệu văn bản
+          </label>
         </div>
 
         <div className={styles.resultsScroll}>
@@ -244,14 +316,18 @@ export default function DocumentsPage() {
               {results.map((doc) => (
                 <div
                   key={doc.rowKey}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => handleViewDetail(doc.documentId)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleViewDetail(doc.documentId)}
                   className={styles.resultCard}
                 >
                   <div className={styles.resultTitleRow}>
                     <div className={styles.resultTitle}>{doc.title || doc.documentNumber || 'Không có tiêu đề'}</div>
+                    <Link
+                      href={`/vbpl/${doc.documentId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.viewDetailBtn}
+                    >
+                      Xem chi tiết →
+                    </Link>
                   </div>
                   <div className={styles.resultMeta}>
                     {doc.documentNumber && <span>Số hiệu: {doc.documentNumber}</span>}
@@ -284,7 +360,10 @@ export default function DocumentsPage() {
               {detail.status && <div>Trạng thái: {detail.status}</div>}
               {detail.field && <div>Lĩnh vực: {detail.field}</div>}
             </div>
-            <div className={styles.detailBody}>{detail.content}</div>
+            <div 
+              className={styles.detailBody} 
+              dangerouslySetInnerHTML={{ __html: parseMarkdownToHtml(detail.content) }} 
+            />
           </div>
         </div>
       )}

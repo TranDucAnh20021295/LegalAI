@@ -11,9 +11,21 @@ pip install -r requirements.txt
 
 ## Chạy
 
+Trong thư mục `services/embedding-service`:
+
 ```bash
 python app.py
 ```
+
+Trên Windows nếu lệnh trên không được, thử `py app.py`.
+
+Hoặc (sau khi có `package.json` trong thư mục này):
+
+```bash
+npm run dev
+```
+
+**Lưu ý:** Chỉ chạy `npm run dev` **trong** `services/embedding-service` (có `package.json` riêng). Nếu chạy `npm run dev` ở thư mục con khác không có `package.json`, npm có thể dùng script của repo gốc → trùng cổng gateway/auth.
 
 Mặc định chạy tại `http://localhost:5004`.
 

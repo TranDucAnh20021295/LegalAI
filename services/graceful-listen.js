@@ -5,6 +5,9 @@ function mountListen(app, port, serviceName, onListening) {
   const server = app.listen(port, () => {
     if (typeof onListening === 'function') onListening();
   });
+  server.timeout = 300000;
+  server.keepAliveTimeout = 300000;
+  server.headersTimeout = 305000;
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {

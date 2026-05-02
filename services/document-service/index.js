@@ -11,6 +11,8 @@ if (fs.existsSync(rootEnv)) dotenv.config({ path: rootEnv });
 if (fs.existsSync(chatEnvPath)) dotenv.config({ path: chatEnvPath });
 dotenv.config({ path: docEnvPath, override: true });
 
+console.log('[Document Service] Environment loaded');
+
 const express = require('express');
 const { mountListen } = require('../graceful-listen');
 const cors = require('cors');
