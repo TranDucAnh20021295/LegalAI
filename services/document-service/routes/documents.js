@@ -6,9 +6,18 @@ const { splitTextIntoChunks } = require('../lib/splitText');
 
 const router = express.Router();
 
+function parseDocumentIdParam(raw) {
+  if (!raw) return '';
+  try {
+    return decodeURIComponent(raw).trim();
+  } catch {
+    return String(raw).trim();
+  }
+}
+
 router.post('/:documentId/split-and-index', async (req, res) => {
   try {
-    const { documentId } = req.params;
+    const documentId = parseDocumentIdParam(req.params.documentId);
     const doc = await LegalDocument.viewDetail(documentId);
     if (!doc || !doc.content) {
       return res.status(404).json({ message: 'Không tìm thấy văn bản hoặc văn bản không có nội dung' });
@@ -180,7 +189,7 @@ router.get('/filter', async (req, res) => {
 
 router.get('/:documentId', async (req, res) => {
   try {
-    const { documentId } = req.params;
+    const documentId = parseDocumentIdParam(req.params.documentId);
     const doc = await LegalDocument.viewDetail(documentId);
     if (!doc) {
       return res.status(404).json({ message: 'Không tìm thấy văn bản' });
@@ -194,7 +203,7 @@ router.get('/:documentId', async (req, res) => {
 
 router.put('/:documentId', async (req, res) => {
   try {
-    const { documentId } = req.params;
+    const documentId = parseDocumentIdParam(req.params.documentId);
     const updated = await LegalDocument.update(documentId, req.body);
     if (!updated) {
       return res.status(404).json({ message: 'Không tìm thấy văn bản' });
@@ -208,7 +217,7 @@ router.put('/:documentId', async (req, res) => {
 
 router.delete('/:documentId', async (req, res) => {
   try {
-    const { documentId } = req.params;
+    const documentId = parseDocumentIdParam(req.params.documentId);
     const deleted = await LegalDocument.delete(documentId);
     if (!deleted) {
       return res.status(404).json({ message: 'Không tìm thấy văn bản' });

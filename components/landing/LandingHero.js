@@ -2,17 +2,18 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { documentAPI } from '@/lib/api';
+import { vbplHref } from '@/lib/vbpl';
 import styles from './LandingHero.module.css';
 
 /** Xóa Markdown syntax để hiển thị text thuần */
 function stripMd(text) {
   if (!text) return '';
   return String(text)
-    .replace(/<[\s\S]*?>/g, ' ')          // HTML tags
-    .replace(/#{1,6}\s+/g, '')             // ## heading
-    .replace(/\*\*(.*?)\*\*/g, '$1')       // **bold**
-    .replace(/\*(.*?)\*/g, '$1')           // *italic*
-    .replace(/\\([.!?,;:\)\(\[\]\*\_])/g, '$1') // backslash escapes
+    .replace(/<[\s\S]*?>/g, ' ')
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/[\*_]{2,}/g, '')
+    .replace(/[\*_]/g, '')
+    .replace(/\\([.!?,;:\)\(\[\]\*\_])/g, '$1')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -84,7 +85,7 @@ export default function LandingHero({
 
   const handleSelect = (doc) => {
     if (doc.documentId) {
-      window.open(`/vbpl/${doc.documentId}`, '_blank');
+      window.open(vbplHref(doc.documentId), '_blank');
     }
     setDropdownOpen(false);
     setSearchQuery('');
@@ -157,7 +158,7 @@ export default function LandingHero({
                 <div key={r.documentId || i} className={styles.searchResultItem} onClick={() => handleSelect(r)}>
                   <span className={styles.resultBadge}>{r.documentType || r.field || 'VB'}</span>
                   <div>
-                    <div className={styles.resultTitle}>{r.title || r.documentNumber || 'Văn bản pháp luật'}</div>
+                    <div className={styles.resultTitle}>{stripMd(r.title) || r.documentNumber || 'Văn bản pháp luật'}</div>
                     {r.documentNumber && (
                       <div className={styles.resultDesc}>{r.documentNumber}</div>
                     )}

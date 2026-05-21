@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { authAPI, documentAPI, chatAPI } from '@/lib/api';
+import { vbplHref } from '@/lib/vbpl';
 import { getUserToken, clearUserToken } from '@/lib/auth-storage';
 import shell from '../dashboard-shell.module.css';
 import styles from './page.module.css';
@@ -321,7 +322,7 @@ export default function DocumentsPage() {
                   <div className={styles.resultTitleRow}>
                     <div className={styles.resultTitle}>{doc.title || doc.documentNumber || 'Không có tiêu đề'}</div>
                     <Link
-                      href={`/vbpl/${doc.documentId}`}
+                      href={vbplHref(doc.documentId)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={styles.viewDetailBtn}

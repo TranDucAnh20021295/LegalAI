@@ -184,7 +184,7 @@ router.put('/admin/config/:key', requireAdmin, async (req, res) => {
     
     // Xóa Cache trong Redis để RAG cập nhật lập tức
     try {
-      const redisClient = require('../../lib/redis');
+      const redisClient = require('../lib/redis');
       if (redisClient.isReady) await redisClient.del('system_config_cache');
     } catch(err) {
       console.warn('[Redis] Không thể xóa cache:', err.message);
@@ -298,15 +298,16 @@ router.post('/admin/crawler/start', requireAdmin, async (req, res) => {
   crawlerState.logs = ['[Hệ thống] Bắt đầu quá trình cập nhật VBPL tự động...'];
   res.json({ message: 'Đã bắt đầu tiến trình cập nhật.' });
 
-  // Đường dẫn tới thư mục legal-crawler và python trong venv
-  const crawlerPath = path.resolve(__dirname, '../../../legal-crawler');
-  const pythonPath = path.join(crawlerPath, 'venv', 'Scripts', 'python.exe');
+  // Đường dẫn tới thư mục dữ liệu legal-crawler, thư mục code crawler và python trong venv mới
+  const dataPath = path.resolve(__dirname, '../../../legal-crawler');
+  const codePath = path.resolve(__dirname, '../crawler');
+  const pythonPath = path.join(codePath, 'venv', 'Scripts', 'python.exe');
 
   try {
     crawlerState.currentTask = 'CRAWL_NEW_DOCS';
     crawlerState.logs.push('======================================');
     crawlerState.logs.push('[1/5] Đang kiểm tra và tải văn bản mới nhất từ trang chủ...');
-    await runPython(pythonPath, ['-u', 'crawler.py', '--homepage-new', '--output', 'newvbpl_data'], crawlerPath);
+    await runPython(pythonPath, ['-u', path.join(codePath, 'crawler.py'), '--homepage-new', '--output', 'newvbpl_data'], dataPath);
 
     // Kiểm tra xem có văn bản mới không
     const hasNewDocs = crawlerState.logs.some(l => l.includes('CRAWLER_SIGNAL: NEW_DOCS_COUNT'));
@@ -323,25 +324,25 @@ router.post('/admin/crawler/start', requireAdmin, async (req, res) => {
     crawlerState.currentTask = 'CONVERT_MD';
     crawlerState.logs.push('======================================');
     crawlerState.logs.push('[2/5] Chuyển đổi định dạng Word/PDF sang Markdown...');
-    await runPython(pythonPath, ['-u', 'convert_to_md.py'], crawlerPath);
+    await runPython(pythonPath, ['-u', path.join(codePath, 'convert_to_md.py'), '--update'], dataPath);
 
     crawlerState.currentTask = 'SPLIT_AND_SYNC';
     crawlerState.logs.push('======================================');
     crawlerState.logs.push('[3/5] Phân tách Điều luật...');
-    await runPython(pythonPath, ['-u', 'split_by_articles.py', '--update'], crawlerPath);
+    await runPython(pythonPath, ['-u', path.join(codePath, 'split_by_articles.py'), '--update'], dataPath);
 
     crawlerState.currentTask = 'IMPORT_DB';
     crawlerState.logs.push('======================================');
     crawlerState.logs.push('[4/5] Đồng bộ Văn bản và Điều luật vào Database...');
-    await runPython(pythonPath, ['-u', 'import_vbplmd.py', '--update'], crawlerPath);
-    await runPython(pythonPath, ['-u', 'import_articles_pg.py', '--update'], crawlerPath);
+    await runPython(pythonPath, ['-u', path.join(codePath, 'import_vbplmd.py'), '--update'], dataPath);
+    await runPython(pythonPath, ['-u', path.join(codePath, 'import_articles_pg.py'), '--update'], dataPath);
 
     crawlerState.currentTask = 'EMBEDDING';
     crawlerState.logs.push('======================================');
     crawlerState.logs.push('[5/5] Đang tạo Vector Embedding cho các Điều luật mới...');
     // Gọi script Node.js từ trong service
     const docServicePath = path.resolve(__dirname, '../../document-service');
-    await runPython('node', ['embed_all.js'], docServicePath);
+    await runPython('node', ['embed_all.js', '--recent-limit', '1000'], docServicePath);
 
     crawlerState.logs.push('======================================');
     crawlerState.logs.push('✅ QUÁ TRÌNH CẬP NHẬT HOÀN TẤT THÀNH CÔNG!');

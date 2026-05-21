@@ -1,12 +1,23 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { documentAPI } from '@/lib/api';
 import { getUserToken, clearUserToken } from '@/lib/auth-storage';
 import { authAPI } from '@/lib/api';
+import { resolveDocumentIdFromParams } from '@/lib/vbpl';
 import styles from './page.module.css';
+
+/** Xóa ký hiệu Markdown để hiển thị text thuần cho tiêu đề */
+function stripMd(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/[\*_]{2,}/g, '') // Xóa ** hoặc __
+    .replace(/[\*_]/g, '')    // Xóa * hoặc _ lẻ
+    .replace(/\\([.!?,;:\)\(\[\]\*\_\-\#\~\`\|\\])/g, '$1') // Xóa backslash
+    .trim();
+}
 
 /* ──────────────────────────────────────────
    Render nội dung HTML + Markdown hỗn hợp
@@ -23,34 +34,50 @@ function contentToHtml(text) {
   // Xóa ký hiệu kết thúc văn bản pháp luật truyền thống (./.) nếu người dùng thấy thừa
   s = s.replace(/\.\/\.\s*$/gm, '.');
 
+  // Tự động xuống dòng cho các tiêu đề lớn nếu bị dính liền (thường do lỗi convert PDF/Word)
+  s = s.replace(/([^\n])\s+(Chương [IVXLCDM\d]+|Điều \d+|Mục \d+|Phần [IVXLCDM\d]+|Phụ lục [IVXLCDM\d]*)/gi, '$1\n$2');
+
   // Hàm xử lý Markdown cho một đoạn text
   const processMd = (t) => {
     let m = t;
-    // Headings
+    // Headings (Mặc định Markdown)
     m = m.replace(/^(#{1,6})\s+(.+)$/gm, (_, h, c) =>
       `<h${h.length} style="color:#111827;font-weight:700;margin:1.2em 0 .5em">${c}</h${h.length}>`);
-    
-    // Bold-Italic
-    m = m.replace(/\*\*\*([^\n]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-    m = m.replace(/___([^\n]+?)___/g, '<strong><em>$1</em></strong>');
-    
+
+    // Tự động Style cho Chương (Căn giữa, To, Đậm, Xanh)
+    // Hỗ trợ cả trường hợp bị bọc bởi ** hoặc __
+    m = m.replace(/^\s*([\*_]{2,})?(Chương\s+[IVXLCDM\d\.]+\s*.*?)([\*_]{2,})?$/gmi,
+      '<div style="text-align:center; font-size:1.4rem; font-weight:800; margin:2rem 0 1rem; color:#1e40af; text-transform:uppercase; line-height:1.4; display:block;">$2</div>');
+
+    // Tự động Style cho Mục (Căn giữa, Vừa, Đậm)
+    m = m.replace(/^\s*([\*_]{2,})?(Mục\s+\d+\s*.*?)([\*_]{2,})?$/gmi,
+      '<div style="text-align:center; font-size:1.15rem; font-weight:700; margin:1.5rem 0 0.8rem; color:#1e3a8a; display:block;">$2</div>');
+
+    // Tự động Style cho Điều (Đậm, màu sẫm)
+    m = m.replace(/^\s*([\*_]{2,})?(Điều\s+\d+[\.\s].*?)([\*_]{2,})?(\n|$)/gmi,
+      '<div style="font-weight:700; font-size:1.1rem; color:#111827; margin:1rem 0 0.1rem; display:block;">$2</div>');
+
+    // Bold-Italic (Chỉ cho phép xuống dòng đơn, không cho phép băng qua đoạn văn mới \n\n)
+    m = m.replace(/\*\*\*([^\n]+(?:\n[^\n]+)*)\*\*\*/g, '<strong><em>$1</em></strong>');
+    m = m.replace(/___([^\n]+(?:\n[^\n]+)*)___/g, '<strong><em>$1</em></strong>');
+
     // Bold
-    m = m.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
-    m = m.replace(/__([^\n]+?)__/g, '<strong>$1</strong>');
-    
+    m = m.replace(/\*\*([^\n]+(?:\n[^\n]+)*)\*\*/g, '<strong>$1</strong>');
+    m = m.replace(/__([^\n]+(?:\n[^\n]+)*)__/g, '<strong>$1</strong>');
+
     // Italic
-    m = m.replace(/\*([^\n]+?)\*/g, '<em>$1</em>');
-    m = m.replace(/_([^\n]+?)_/g, '<em>$1</em>');
+    m = m.replace(/\*([^\n]+(?:\n[^\n]+)*)\*/g, '<em>$1</em>');
+    m = m.replace(/_([^\n]+(?:\n[^\n]+)*)_/g, '<em>$1</em>');
 
     // Blockquotes
     m = m.replace(/^>\s*(.+)$/gm, '<blockquote style="border-left: 4px solid #e5e7eb; padding-left: 1rem; color: #4b5563; font-style: italic; margin: 0.5rem 0;">$1</blockquote>');
-    
-    // Xóa các ký tự Markdown lẻ loi (artifact) thường xuất hiện ở đầu/cuối dòng hoặc cạnh khoảng trắng
-    m = m.replace(/[\*_]{3,}/g, ''); 
-    
-    // Xóa backslash escape
+
+    // Xóa các ký tự Markdown lẻ loi (artifact) còn sót lại sau khi đã parse Bold/Italic
+    m = m.replace(/[\*_]{2,}/g, '');
+
+    // Xóa backslash escape còn sót
     m = m.replace(/\\([.!?,;:\)\(\[\]\*\_\-\#\~\`\|\\])/g, '$1');
-    
+
     return m;
   };
 
@@ -62,7 +89,7 @@ function contentToHtml(text) {
     return segments.map((seg) => {
       const isTable = /^\s*<table/i.test(seg);
       let processed = processMd(seg);
-      if (isTable) return processed; 
+      if (isTable) return processed;
       return processed.replace(/\n/g, '<br>');
     }).join('');
   }
@@ -77,16 +104,19 @@ function contentToHtml(text) {
    ────────────────────────────────────────── */
 export default function VbplDetailPage() {
   const params = useParams();
-  const documentId = params?.documentId;
+  const documentId = useMemo(
+    () => resolveDocumentIdFromParams(params?.documentId),
+    [params?.documentId]
+  );
 
-  const [user, setUser]       = useState(null);
+  const [user, setUser] = useState(null);
   const [userLoading, setUserLoading] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
-  const [doc, setDoc]         = useState(null);
-  const [error, setError]     = useState('');
+  const [doc, setDoc] = useState(null);
+  const [error, setError] = useState('');
 
   // Load user nếu đã đăng nhập
   useEffect(() => {
@@ -137,7 +167,7 @@ export default function VbplDetailPage() {
 
 
   const handleLogout = () => {
-    authAPI.logout().catch(() => {});
+    authAPI.logout().catch(() => { });
     clearUserToken();
     setUser(null);
   };
@@ -235,7 +265,7 @@ export default function VbplDetailPage() {
           </div>
 
           {/* Tiêu đề */}
-          <h1 className={styles.docTitle}>{doc.title || 'Không có tiêu đề'}</h1>
+          <h1 className={styles.docTitle}>{stripMd(doc.title) || 'Không có tiêu đề'}</h1>
 
           {/* Metadata */}
           <div className={styles.metaGrid}>
@@ -255,7 +285,7 @@ export default function VbplDetailPage() {
               <div className={styles.metaItem}>
                 <span className={styles.metaLabel}>📅 Ngày ban hành</span>
                 <span className={styles.metaValue}>
-                  {(function(d) {
+                  {(function (d) {
                     const obj = new Date(d);
                     if (!isNaN(obj.getTime())) return obj.toLocaleDateString('vi-VN');
                     return d;
@@ -267,7 +297,7 @@ export default function VbplDetailPage() {
               <div className={styles.metaItem}>
                 <span className={styles.metaLabel}>✅ Hiệu lực từ</span>
                 <span className={styles.metaValue}>
-                  {(function(d) {
+                  {(function (d) {
                     const obj = new Date(d);
                     if (!isNaN(obj.getTime())) return obj.toLocaleDateString('vi-VN');
                     return d;

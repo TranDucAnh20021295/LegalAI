@@ -70,7 +70,7 @@ export function useChat() {
     try {
       let convId = activeConversationId;
       if (!convId) {
-        const newConv = await chatAPI.createConversation();
+        const newConv = await chatAPI.createConversation(text.slice(0, 40));
         setConversations(prev => [newConv, ...prev]);
         setActiveConversationId(newConv.conversationId);
         convId = newConv.conversationId;
@@ -80,6 +80,10 @@ export function useChat() {
       setMessages(prev => [...prev, { senderType: 'USER', content: text }, res.aiMessage]);
     } catch (err) {
       console.error(err);
+      const errorMsg = err.response?.status === 401 
+        ? 'Bạn cần đăng nhập để sử dụng dịch vụ này.' 
+        : 'Có lỗi xảy ra, vui lòng thử lại.';
+      setMessages(prev => [...prev, { senderType: 'USER', content: text }, { senderType: 'AI', content: errorMsg }]);
     } finally {
       setSending(false);
     }

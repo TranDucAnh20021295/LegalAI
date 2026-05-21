@@ -129,17 +129,29 @@ async function getEmbeddingOpenAIBatch(texts) {
   if (!OPENAI || !Array.isArray(texts) || texts.length === 0) return [];
   const inputs = texts.map((t) => (typeof t === 'string' ? t.trim().slice(0, 8000) : '')).filter(Boolean);
   if (inputs.length === 0) return [];
-  try {
-    const { data } = await OPENAI.embeddings.create({
-      model: OPENAI_MODEL,
-      input: inputs,
-      dimensions: OPENAI_DIM,
-    });
-    return (data || []).map((d) => d.embedding).filter(Boolean);
-  } catch (err) {
-    console.error('[Embedding] OpenAI batch:', err.message);
-    return [];
+  const maxAttempts = Math.max(1, Number(process.env.OPENAI_EMBEDDING_RETRIES) || 5);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const { data } = await OPENAI.embeddings.create({
+        model: OPENAI_MODEL,
+        input: inputs,
+        dimensions: OPENAI_DIM,
+      });
+      return (data || []).map((d) => d.embedding).filter(Boolean);
+    } catch (err) {
+      const message = err?.message || String(err);
+      console.error('[Embedding] OpenAI batch:', message);
+      if (attempt >= maxAttempts || !/rate limit|429|TPM|try again/i.test(message)) {
+        return [];
+      }
+      const retryAfter = Number(err?.headers?.['retry-after']);
+      const delayMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : attempt * 5000;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
   }
+  return [];
 }
 
 async function getEmbedding(text) {

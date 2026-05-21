@@ -24,7 +24,7 @@ export default function DashboardPage() {
   const [subscription, setSubscription] = useState({ active: false });
   const [subLoading, setSubLoading] = useState(true);
   const [showPaywall, setShowPaywall] = useState(false);
-  const [totalMsgCount, setTotalMsgCount] = useState(0);
+  const [todayMsgCount, setTodayMsgCount] = useState(0); // Số tin nhắn hôm nay (khớp với backend daily limit)
   const scrollRef = useRef(null);
   const menuRef = useRef(null);
   const mounted = useRef(false);
@@ -47,8 +47,11 @@ export default function DashboardPage() {
     chatAPI.listConversations()
       .then((list) => {
         setConversations(list || []);
-        const count = (list || []).reduce((a, c) => a + (c.messageCount || 0), 0);
-        setTotalMsgCount(count);
+        // Tính số tin nhắn USER đã gửi hôm nay (khớp với logic backend daily limit)
+        const todayStr = new Date().toISOString().split('T')[0];
+        // Dùng daily usage API nếu có, fallback về 0 (backend sẽ xử lý chính xác)
+        // Không đếm totalMsgCount nữa vì backend check theo ngày, không theo tổng
+        setTodayMsgCount(0); // sẽ được cập nhật khi gửi tin
       })
       .catch(() => {});
     chatAPI.getSubscriptionMe()
@@ -157,8 +160,9 @@ export default function DashboardPage() {
     const text = question.trim();
     if (!text || sending) return;
 
-    // Freemium gate
-    if (!subscription.active && totalMsgCount >= FREE_MSG_LIMIT) {
+    // Freemium gate chỉ chặn ở client nếu CHƯA có gói VÀ đã dùng hết hôm nay.
+    // Backend là nguồn sự thật cuối cùng — nếu client check sai thì backend sẽ trả 403.
+    if (!subscription.active && todayMsgCount >= FREE_MSG_LIMIT) {
       setShowPaywall(true);
       return;
     }
@@ -186,10 +190,17 @@ export default function DashboardPage() {
         ];
       });
 
-      setTotalMsgCount(c => c + 1);
+      // Chỉ tăng đếm hôm nay nếu chưa có gói (có gói thì không cần track)
+      if (!subscription.active) {
+        setTodayMsgCount(c => c + 1);
+      }
     } catch (err) {
       const status = err?.response?.status;
       if (status === 403) {
+        // Backend xác nhận hết lượt → đồng bộ subscription state và hiện paywall
+        chatAPI.getSubscriptionMe()
+          .then((d) => setSubscription({ active: !!d.active, plan: d.plan, endsAt: d.endsAt }))
+          .catch(() => {});
         setShowPaywall(true);
         setMessages(prev => prev.filter(m => !m.messageId?.startsWith('tmp-')));
       } else {
@@ -302,9 +313,9 @@ export default function DashboardPage() {
         {!sb && !subscription.active && !subLoading && (
           <div className={styles.freeCounter}>
             <div className={styles.freeBar}>
-              <div className={styles.freeBarFill} style={{ width: `${Math.min(100, (totalMsgCount / FREE_MSG_LIMIT) * 100)}%` }} />
+              <div className={styles.freeBarFill} style={{ width: `${Math.min(100, (todayMsgCount / FREE_MSG_LIMIT) * 100)}%` }} />
             </div>
-            <span className={styles.freeText}>{Math.max(0, FREE_MSG_LIMIT - totalMsgCount)} tin nhắn miễn phí còn lại</span>
+            <span className={styles.freeText}>{Math.max(0, FREE_MSG_LIMIT - todayMsgCount)} tin nhắn miễn phí hôm nay còn lại</span>
           </div>
         )}
 

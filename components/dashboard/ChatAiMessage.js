@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect, useCallback, Fragment, createElement } fr
 import Link from 'next/link';
 import styles from './ChatAiMessage.module.css';
 import { documentAPI } from '@/lib/api';
+import { vbplHref } from '@/lib/vbpl';
 
 function parseMetadata(raw) {
   if (raw == null) return null;
@@ -352,7 +353,7 @@ export default function ChatAiMessage({ content, metadata, isNew, hideSources = 
 
   const openSource = useCallback((row) => {
     if (row.documentId) {
-      window.open(`/vbpl/${row.documentId}`, '_blank');
+      window.open(vbplHref(row.documentId), '_blank');
       return;
     }
     // Chỉ hiện modal cho các đoạn trích không có ID chính thức
@@ -438,7 +439,7 @@ export default function ChatAiMessage({ content, metadata, isNew, hideSources = 
             )}
             {panel.phase === 'full' && panel.documentId ? (
               <div className={styles.panelFooter}>
-                <Link href={`/vbpl/${panel.documentId}`} target="_blank" className={styles.docLink}>
+                <Link href={vbplHref(panel.documentId)} target="_blank" className={styles.docLink}>
                   Xem toàn văn →
                 </Link>
               </div>

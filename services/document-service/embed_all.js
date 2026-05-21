@@ -23,6 +23,8 @@ function progressLog(prefix, current, total) {
 async function run() {
   const args = process.argv.slice(2);
   const isReset = args.includes('--reset');
+  const recentLimitArgIndex = args.indexOf('--recent-limit');
+  const recentLimit = recentLimitArgIndex >= 0 ? Math.max(1, Number(args[recentLimitArgIndex + 1]) || 0) : 0;
 
   try {
     await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
@@ -40,18 +42,26 @@ async function run() {
 
   console.log('\n1. Lấy danh sách 360.000+ Điều Luật từ vbpl_articles_data...');
 
-  const artRes = await pool.query(`
-    SELECT id 
-    FROM vbpl_articles_data 
-    WHERE content IS NOT NULL
-  `);
-  const allArticleIds = artRes.rows.map(r => r.id);
+  const artRes = recentLimit
+    ? await pool.query(`
+        SELECT id
+        FROM vbpl_articles_data
+        WHERE content IS NOT NULL
+        ORDER BY id DESC
+        LIMIT $1
+      `, [recentLimit])
+    : await pool.query(`
+        SELECT id
+        FROM vbpl_articles_data
+        WHERE content IS NOT NULL
+      `);
+  const allArticleIds = artRes.rows.map(r => r.id).sort((a, b) => a - b);
 
   const existingRes = await pool.query('SELECT DISTINCT "chunkIndex" FROM "DocumentChunks"');
   const existingArtIds = new Set(existingRes.rows.map(r => r.chunkIndex));
   const artsToProcess = allArticleIds.filter(id => !existingArtIds.has(id));
 
-  console.log(`=> Tổng số Điều luật: ${allArticleIds.length} | Đã nhúng: ${existingArtIds.size} | Cần chạy tiếp: ${artsToProcess.length}\n`);
+  console.log(`=> Phạm vi Điều luật: ${allArticleIds.length}${recentLimit ? ` mới nhất (--recent-limit ${recentLimit})` : ''} | Đã nhúng toàn DB: ${existingArtIds.size} | Cần chạy tiếp trong phạm vi: ${artsToProcess.length}\n`);
 
   const col = isLocal ? 'embedding_768' : 'embedding';
   const BATCH_SIZE = 100;
@@ -69,14 +79,18 @@ async function run() {
     let validChunks = [];
 
     for (const art of batchArticles) {
-      if (art.content.length > 30000) continue;
+      const contentChunks = art.content.length > 30000
+        ? splitTextIntoChunks(art.content, 1500, 200)
+        : [art.content];
 
-      validChunks.push({
-        id: art.id,
-        documentId: art.documentid,
-        textToEmbed: art.title ? `${art.title}: ${art.content}` : art.content,
-        exactContent: art.content
-      });
+      for (const [chunkNo, chunkText] of contentChunks.entries()) {
+        validChunks.push({
+          id: art.id,
+          documentId: art.documentid,
+          textToEmbed: art.title ? `${art.title}${contentChunks.length > 1 ? ` #${chunkNo + 1}` : ''}: ${chunkText}` : chunkText,
+          exactContent: chunkText
+        });
+      }
     }
 
     if (validChunks.length === 0) {

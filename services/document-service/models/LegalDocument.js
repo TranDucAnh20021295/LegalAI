@@ -6,8 +6,9 @@ class LegalDocument {
 
   static _mapRow(row) {
     if (!row) return null;
+    const rawId = row.documentId || row.id || '';
     return {
-      documentId:       row.documentId || row.id || '',
+      documentId:       String(rawId).trim(),
       title:            row.title || '',
       documentNumber:   row.documentNumber || '',
       documentType:     row.documentType || '',
@@ -81,8 +82,9 @@ class LegalDocument {
 
   static async viewDetail(documentId) {
     try {
-      const query = `SELECT * FROM "${TABLE}" WHERE "documentId"::text = $1 OR id::text = $1 LIMIT 1`;
-      const result = await pool.query(query, [documentId]);
+      const id = String(documentId || '').trim();
+      const query = `SELECT * FROM "${TABLE}" WHERE TRIM("documentId") = $1 OR id::text = $1 LIMIT 1`;
+      const result = await pool.query(query, [id]);
       return this._mapRow(result.rows[0]);
     } catch (e) {
       console.error('[Document Model] viewDetail error:', e.message);

@@ -36,6 +36,9 @@ class Conversation {
   }
 
   static async delete(conversationId, userId) {
+    // Xóa tin nhắn trước để tránh lỗi ràng buộc khóa ngoại (Foreign Key) nếu DB chưa cấu hình CASCADE
+    await pool.query('DELETE FROM messages WHERE "conversationId" = $1', [conversationId]);
+    // Sau đó xóa hội thoại
     await pool.query('DELETE FROM conversations WHERE "conversationId" = $1 AND "userId" = $2', [conversationId, userId]);
   }
 

@@ -20,6 +20,7 @@ const cors = require('cors');
 const initDatabase = require('./config/initDatabase');
 const documentRoutes = require('./routes/documents');
 const { runSync } = require('./lib/syncChunks');
+const { startStatusScheduler } = require('./lib/statusScheduler');
 const { getEmbeddingStatus } = require('./lib/embedding');
 
 const app = express();
@@ -51,6 +52,10 @@ initDatabase()
     mountListen(app, PORT, 'document-service', () => {
       console.log(`Documents: http://localhost:${PORT}`);
       console.log('[Embedding]', getEmbeddingStatus());
+
+      // Tự động cập nhật status văn bản "Chưa có hiệu lực" → "Còn hiệu lực"
+      startStatusScheduler();
+
       if (AUTO_SYNC) {
         setImmediate(() => {
           console.log('[Document] Đang đồng bộ chunks + embedding (chạy nền)...');

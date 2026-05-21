@@ -9,6 +9,7 @@ import PitCalculatorModal from '@/components/landing/PitCalculatorModal';
 import AuthModal from '@/components/landing/AuthModal';
 import { useLanding } from '@/hooks/useLanding';
 import { documentAPI } from '@/lib/api';
+import { vbplHref } from '@/lib/vbpl';
 
 import styles from './page.module.css';
 
@@ -30,6 +31,18 @@ function stripHtml(html) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 180);
+}
+
+/** Xóa ký hiệu Markdown khỏi tiêu đề */
+function stripMd(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/#{1,6}\s+/g, '')
+    .replace(/[\*_]{2,}/g, '')
+    .replace(/[\*_]/g, '')
+    .replace(/\\([.!?,;:\)\(\[\]\*\_\-\#\~\`\|\\])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 const INITIAL_LAWS = [
@@ -65,7 +78,7 @@ export default function HomePage() {
           return {
             id: d.documentId,
             documentId: d.documentId,
-            title: d.title,
+            title: stripMd(d.title),
             documentNumber: d.documentNumber,
             documentType: d.documentType,
             category: d.field || d.documentType,
@@ -140,7 +153,7 @@ export default function HomePage() {
         catLabels={catLabels}
         openLaw={(law) => {
           if (law.documentId) {
-            window.open(`/vbpl/${law.documentId}`, '_blank');
+            window.open(vbplHref(law.documentId), '_blank');
           }
         }}
       />

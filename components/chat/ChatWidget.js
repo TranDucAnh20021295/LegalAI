@@ -12,7 +12,6 @@ export default function ChatWidget() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [convId, setConvId] = useState(null);
   const [context, setContext] = useState(null); // { title, content, id }
   const scrollRef = useRef(null);
   
@@ -72,25 +71,17 @@ export default function ChatWidget() {
     setMessages(prev => [...prev, userMsg]);
 
     try {
-      let currentId = convId;
+      // Dùng askAnonymous để không lưu vào Database
+      const res = await chatAPI.askAnonymous(text, context?.id);
       
-      // Nếu là cuộc hội thoại mới và đang ở trang VBPL, dùng tên văn bản làm tiêu đề
-      if (!currentId) {
-        const title = context ? `Hỏi về: ${context.title}` : text.slice(0, 30);
-        const newConv = await chatAPI.createConversation(title);
-        currentId = newConv.conversationId;
-        setConvId(currentId);
-      }
-      
-      // Chèn ID vào đầu Prompt để AI/RAG nhận diện bộ lọc nếu Backend có hỗ trợ qua text
-      const finalPrompt = context?.id ? `[FILTER_ID: ${context.id}] ${text}` : text;
-      
-      const res = await chatAPI.sendMessage(currentId, finalPrompt, 'USER', context?.id);
+      // Map kết quả trả về vào UI
       setMessages(prev => [...prev, { ...res.aiMessage, isNew: true }]);
     } catch (err) {
-
-
-      setMessages(prev => [...prev, { senderType: 'AI', content: 'Có lỗi xảy ra, vui lòng thử lại.' }]);
+      console.error(err);
+      const msg = err.response?.status === 401 
+        ? 'Bạn cần đăng nhập để sử dụng dịch vụ này.' 
+        : 'Có lỗi xảy ra, vui lòng thử lại.';
+      setMessages(prev => [...prev, { senderType: 'AI', content: msg }]);
     } finally {
       setLoading(false);
     }

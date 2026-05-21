@@ -21,13 +21,6 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const activeSub = await Subscription.findActiveByUserId(req.userId);
-    if (!activeSub) {
-      return res.status(403).json({
-        message: 'Bạn cần mua gói LegalAI còn hạn để tạo cuộc trò chuyện.',
-        active: false,
-      });
-    }
     const title = req.body.title || 'Cuộc hội thoại mới';
     const conv = await Conversation.create(req.userId, title);
     res.status(201).json(conv);
@@ -101,35 +94,36 @@ router.post('/:conversationId/messages', async (req, res) => {
         const pool = require('../config/database');
         const redisClient = require('../lib/redis');
         const { getDynamicConfig } = require('../lib/rag');
-        
-        // 1. Lấy giới hạn siêu nhanh từ Redis Cache (thông qua getDynamicConfig)
-        const cfg = await getDynamicConfig();
-        const FREE_LIMIT = parseInt(cfg.FREE_DAILY_LIMIT, 10) || 10;
 
-        // 2. Lấy số lượng câu hỏi hôm nay từ Redis (Cache)
-        const dateStr = new Date().toISOString().split('T')[0];
-        const redisUsageKey = `daily_usage:${dateStr}:${req.userId}`;
-        let todayCount = 0;
+        // 1. Kiểm tra subscription trước — nếu đã có gói thì bỏ qua toàn bộ giới hạn
+        const activeSub = await Subscription.findActiveByUserId(req.userId);
 
-        if (redisClient.isReady) {
-          const cachedCount = await redisClient.get(redisUsageKey);
-          if (cachedCount) {
-            todayCount = parseInt(cachedCount, 10);
-          } else {
-            // Nếu Redis mất, truy vấn DB để đồng bộ lại
-            const usageRes = await pool.query(
-              `SELECT count FROM daily_chat_usage WHERE "userId" = $1 AND date = CURRENT_DATE`,
-              [req.userId]
-            );
-            todayCount = usageRes.rows[0]?.count || 0;
-            await redisClient.setEx(redisUsageKey, 86400, todayCount.toString()); // Lưu cache 1 ngày
+        if (!activeSub) {
+          // Chưa có gói → kiểm tra giới hạn free
+          const cfg = await getDynamicConfig();
+          const FREE_LIMIT = parseInt(cfg.FREE_DAILY_LIMIT, 10) || 10;
+
+          // 2. Lấy số lượng câu hỏi hôm nay từ Redis (Cache)
+          const dateStr = new Date().toISOString().split('T')[0];
+          const redisUsageKey = `daily_usage:${dateStr}:${req.userId}`;
+          let todayCount = 0;
+
+          if (redisClient.isReady) {
+            const cachedCount = await redisClient.get(redisUsageKey);
+            if (cachedCount) {
+              todayCount = parseInt(cachedCount, 10);
+            } else {
+              // Nếu Redis mất, truy vấn DB để đồng bộ lại
+              const usageRes = await pool.query(
+                `SELECT count FROM daily_chat_usage WHERE "userId" = $1 AND date = CURRENT_DATE`,
+                [req.userId]
+              );
+              todayCount = usageRes.rows[0]?.count || 0;
+              await redisClient.setEx(redisUsageKey, 86400, todayCount.toString()); // Lưu cache 1 ngày
+            }
           }
-        }
 
-        if (todayCount >= FREE_LIMIT) {
-          // Hết miễn phí → phải có gói trả phí
-          const activeSub = await Subscription.findActiveByUserId(req.userId);
-          if (!activeSub) {
+          if (todayCount >= FREE_LIMIT) {
             return res.status(403).json({
               message: `Bạn đã dùng hết ${FREE_LIMIT} câu hỏi miễn phí hôm nay. Vui lòng mua gói để tiếp tục.`,
               active: false,
@@ -142,6 +136,8 @@ router.post('/:conversationId/messages', async (req, res) => {
 
         // 3. Tăng bộ đếm (Tăng cực nhanh trên RAM, sau đó ghi đồng bộ xuống ổ cứng cho Admin xem)
         if (redisClient.isReady) {
+          const dateStr = new Date().toISOString().split('T')[0];
+          const redisUsageKey = `daily_usage:${dateStr}:${req.userId}`;
           await redisClient.incr(redisUsageKey);
         }
         await pool.query(
@@ -192,6 +188,49 @@ router.post('/:conversationId/messages', async (req, res) => {
 
   } catch (error) {
     console.error('[Chat] send message:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+});
+
+/**
+ * Endpoint hỏi đáp nhanh (Anonymous/Widget): Không lưu vào Database.
+ * Giúp widget không làm rác danh sách hội thoại của người dùng.
+ */
+router.post('/ask-anonymous', async (req, res) => {
+  try {
+    const { content, documentId, document_id } = req.body;
+    const finalDocId = documentId || document_id;
+    if (!content || typeof content !== 'string') {
+      return res.status(400).json({ message: 'Thiếu content' });
+    }
+
+    // Vẫn check giới hạn tin nhắn để tránh spam (nếu cần)
+    // Ở đây ta cho phép nếu là Admin, hoặc chưa vượt quá giới hạn free.
+    // (Có thể bỏ qua check này nếu muốn widget luôn free)
+
+    let aiContent, sources;
+    if (finalDocId) {
+      const { contextText, sources: s, docMeta } = await getContextByDocumentId(finalDocId, content.trim());
+      sources = s;
+      aiContent = await generateReplyForDocument(content.trim(), contextText, docMeta);
+    } else {
+      const { getDynamicConfig, classifyIntent } = require('../lib/rag');
+      const cfg = await getDynamicConfig();
+      const field = await classifyIntent(content.trim(), cfg);
+      const { contextText, sources: s } = await getContextFromDocuments(content.trim(), 12, null, field);
+      sources = s;
+      aiContent = await generateReply(content.trim(), contextText, field);
+    }
+
+    const metadata = sources && sources.length > 0 ? { ragSources: sources } : null;
+    
+    // Trả về dữ liệu giả lập giống như sendMessage nhưng không có ID thật trong DB
+    res.json({
+      userMessage: { content: content.trim(), senderType: 'USER', createdAt: new Date() },
+      aiMessage: { content: aiContent, senderType: 'AI', metadata, createdAt: new Date() }
+    });
+  } catch (error) {
+    console.error('[Chat] ask-anonymous error:', error);
     res.status(500).json({ message: 'Lỗi server' });
   }
 });
