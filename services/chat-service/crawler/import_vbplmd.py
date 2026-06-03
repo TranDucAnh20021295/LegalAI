@@ -3,6 +3,9 @@ import json
 import sys
 import uuid
 import shutil
+import time
+import threading
+import queue
 from pathlib import Path
 from datetime import datetime
 import psycopg2
@@ -23,6 +26,49 @@ DB_CONFIG = {
     'password': '123456',
     'dbname': 'legal_ai'
 }
+
+CLASSIFY_TIMEOUT_SECONDS = float(os.environ.get("CLASSIFY_TIMEOUT_SECONDS", "20"))
+STOP_FLAG = Path(".crawler_stop")
+
+def is_stop_requested():
+    return STOP_FLAG.exists()
+
+def tags_to_field(tags):
+    from classify_documents import CATEGORIES
+    if isinstance(tags, dict):
+        tags = next(iter(tags.values()), ["Khác"])
+    if isinstance(tags, list) and len(tags) > 0:
+        valid = [str(t) for t in tags if str(t) in CATEGORIES]
+        return ", ".join(valid) if valid else str(tags[0])
+    if isinstance(tags, str):
+        return tags
+    return "Khác"
+
+
+def classify_with_timeout(title, brief_content, issuing_agency="", timeout_seconds=CLASSIFY_TIMEOUT_SECONDS):
+    if is_stop_requested():
+        raise InterruptedError("Crawler stop requested")
+    result_queue = queue.Queue(maxsize=1)
+
+    def worker():
+        try:
+            from classify_documents import classify_legal_document
+            tags = classify_legal_document(title, brief_content)
+            result_queue.put(("ok", tags))
+        except Exception as exc:
+            result_queue.put(("error", exc))
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout_seconds)
+
+    if thread.is_alive():
+        raise TimeoutError(f"Quá thời gian phân loại sau {timeout_seconds:.0f}s")
+
+    status, payload = result_queue.get_nowait()
+    if status == "error":
+        raise payload
+    return payload
 
 def parse_date(date_str):
     if not date_str:
@@ -160,6 +206,10 @@ def import_documents(data_dir="vbplmd"):
     
     # Hàm hỗ trợ xử lý một thư mục văn bản
     def process_single_doc_dir(doc_dir, doc_type):
+        if is_stop_requested():
+            print("  [STOP] Nhận tín hiệu dừng crawler — bỏ qua import.", flush=True)
+            return None
+
         meta_path = doc_dir / "metadata.json"
         if not meta_path.exists(): return None
         
@@ -181,14 +231,44 @@ def import_documents(data_dir="vbplmd"):
             content = content.replace('\x00', '').strip()
             now = datetime.now()
             
+            print(f"  [IMPORT] Đang xử lý: {doc_dir.name}", flush=True)
+
+            field = "Legal"
+            try:
+                print(f"  [AI Classify] Bắt đầu phân loại: {meta.get('title', doc_dir.name)[:120]}", flush=True)
+                started_at = time.monotonic()
+                brief_content = content[:500] if content else ""
+                tags = classify_with_timeout(meta.get('title', ''), brief_content)
+                # Xử lý mọi dạng trả về từ GPT
+                if isinstance(tags, dict):
+                    # Lấy giá trị đầu tiên trong dict (dù key là gì)
+                    tags = next(iter(tags.values()), ["Khác"])
+                if isinstance(tags, list) and len(tags) > 0:
+                    # Lọc chỉ giữ các category hợp lệ
+                    from classify_documents import CATEGORIES
+                    valid = [str(t) for t in tags if str(t) in CATEGORIES]
+                    field = ", ".join(valid) if valid else str(tags[0])
+                elif isinstance(tags, str):
+                    field = tags
+                else:
+                    field = "Khác"
+                elapsed = time.monotonic() - started_at
+                print(f"  [AI Classify] Hoàn tất sau {elapsed:.1f}s: {field}", flush=True)
+            except Exception as e:
+                print(f"  [AI Classify Warning] Không thể phân loại lĩnh vực tự động khi insert: {e}", flush=True)
+                field = "Legal"
+
+            # Tự động nhận diện loại văn bản thật (documentType) thay vì lấy mặc định "van_ban_moi"
+            real_doc_type = detect_real_category(doc_dir, meta)
+            
             return (
                 doc_id[:255] if doc_id else str(uuid.uuid4())[:255],
                 meta.get('title', '')[:500] if meta.get('title') else 'No title',
                 meta.get('document_number', '')[:255],
-                doc_type[:255],
+                real_doc_type[:255],
                 meta.get('status', '')[:255],
                 content,
-                'Legal',
+                field,
                 meta.get('issuing_agency', '')[:255],
                 parse_date(meta.get('issued_date', '')),
                 parse_date(meta.get('effective_date', '')),
@@ -205,6 +285,9 @@ def import_documents(data_dir="vbplmd"):
         # Nếu là category folder trực tiếp
         doc_type = base_dir.name
         for doc_dir in base_dir.iterdir():
+            if is_stop_requested():
+                print("[STOP] Dừng import theo yêu cầu Admin.", flush=True)
+                break
             if not doc_dir.is_dir(): continue
             doc_data = process_single_doc_dir(doc_dir, doc_type)
             if doc_data:

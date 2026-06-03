@@ -1,9 +1,0 @@
-{
-  "name": "legalai-embedding-service",
-  "private": true,
-  "description": "Python sentence-transformers API — chạy npm run dev trong thư mục này, không dùng script dev của repo gốc.",
-  "scripts": {
-    "dev": "python app.py",
-    "start": "python app.py"
-  }
-}

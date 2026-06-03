@@ -20,6 +20,7 @@ from requests.exceptions import RequestException
 import random
 from typing import Dict, List, Optional, Union, Callable
 from playwright.sync_api import sync_playwright
+# pyrefly: ignore [missing-import]
 from playwright_stealth import Stealth
 
 if sys.stdout.encoding != 'utf-8':
@@ -1746,80 +1747,206 @@ def main():
                 
             print(f"Đang xử lý {len(new_docs_basic)} văn bản...")
             downloaded_count = 0
+            docs_need_processing = 0
+            homepage_doc_ids = []
             
             for doc_basic in new_docs_basic:
-                # 2. Truy cập trang chi tiết để lấy metadata CHUẨN
+                clean_num = doc_basic.get('document_number', '').strip()
+                if not clean_num:
+                    match = re.search(r'([0-9]{1,5}/[0-9]{4}/[A-ZĐ-]+)', doc_basic.get('title', ''))
+                    if match:
+                        clean_num = match.group(1).strip()
+
                 print(f"\n{'*'*50}")
-                print(f"[*] ĐANG XEM CHI TIẾT: {doc_basic['document_number']}")
-                full_metadata = crawler.get_detailed_metadata(doc_basic)
+                print(f"[*] ĐANG CHECK DB CHO VĂN BẢN TRÊN TRANG CHỦ: '{clean_num}'")
                 
-                # Hiển thị Metadata bóc tách được dưới dạng JSON (Theo yêu cầu của USER)
-                print("\n    --- METADATA THU THẬP ĐƯỢC (JSON) ---")
-                print(json.dumps(full_metadata, indent=2, ensure_ascii=False))
-                print("    ------------------------------------\n")
-                
-                # 3. Đối soát DB
+                # 1. Đối soát DB ngay lập tức bằng số hiệu cơ bản
                 is_new = True
-                if db_conn:
+                is_reimport = False
+                if db_conn and clean_num:
                     cur = None
                     try:
                         cur = db_conn.cursor()
-                        clean_num = full_metadata['document_number'].strip()
-                        print(f"    -> Đang check DB cho số hiệu: '{clean_num}'")
-                        
-                        # Tìm TẤT CẢ các bản ghi trùng số hiệu để dọn dẹp
-                        cur.execute('SELECT status, "effectiveDate", "documentId" FROM "LegalDocuments" WHERE TRIM("documentNumber") ILIKE %s ORDER BY "id" ASC', (clean_num,))
+                        # Tìm TẤT CẢ các bản ghi trùng số hiệu để dọn dẹp và đối soát (hỗ trợ so khớp thông minh số hiệu rút gọn)
+                        cur.execute('SELECT status, "effectiveDate", "documentId", "documentNumber" FROM "LegalDocuments" WHERE TRIM("documentNumber") ILIKE %s OR TRIM("documentNumber") ILIKE %s ORDER BY "id" ASC', (clean_num, f'%{clean_num}%'))
                         rows = cur.fetchall()
                         
                         if rows:
-                            is_new = False
-                            web_status = full_metadata.get('status', '')
-                            web_eff = format_date_to_db(full_metadata.get('effective_date', ''))
-                            s_web_status = str(web_status or '').strip()
-                            s_web_eff = str(web_eff or '').strip()
-
-                            # Bản ghi đầu tiên sẽ được giữ lại làm bản ghi chính
                             primary_row = rows[0]
-                            p_db_status, p_db_eff, p_db_id = primary_row[0], primary_row[1], primary_row[2]
+                            p_db_status, p_db_eff, p_db_id, p_db_doc_num = primary_row[0], primary_row[1], primary_row[2], primary_row[3]
                             
-                            if len(rows) > 1:
-                                print(f"    -> CẢNH BÁO: Tìm thấy {len(rows)} bản ghi trùng. Đang giữ lại ID: {str(p_db_id).strip()} và xóa các bản ghi thừa...")
+                            # Kiểm tra xem văn bản đã được tạo embedding chưa.
+                            # DocumentChunks được tạo từ vbpl_articles_data nên documentId có thể là số hiệu,
+                            # không nhất thiết trùng UUID/documentId của bảng LegalDocuments.
+                            cur.execute(
+                                '''
+                                SELECT COUNT(*)
+                                FROM "DocumentChunks" c
+                                WHERE TRIM(c."documentId") = TRIM(%s)
+                                   OR TRIM(c."documentId") = TRIM(%s)
+                                   OR EXISTS (
+                                     SELECT 1
+                                     FROM vbpl_articles_data a
+                                     WHERE a.id = c."chunkIndex"
+                                       AND (
+                                            TRIM(a.documentid) = TRIM(%s)
+                                         OR TRIM(a.documentid) = TRIM(%s)
+                                         OR TRIM(a.documentnumber) = TRIM(%s)
+                                         OR TRIM(a.documentnumber) = TRIM(%s)
+                                         OR TRIM(a.documentid) ILIKE %s
+                                         OR TRIM(a.documentnumber) ILIKE %s
+                                       )
+                                   )
+                                ''',
+                                (
+                                    str(p_db_id or ''),
+                                    str(p_db_doc_num or clean_num or ''),
+                                    str(p_db_id or ''),
+                                    str(p_db_doc_num or clean_num or ''),
+                                    str(p_db_doc_num or clean_num or ''),
+                                    str(clean_num or ''),
+                                    f'%{clean_num}%',
+                                    f'%{clean_num}%',
+                                )
+                            )
+                            chunk_count = cur.fetchone()[0]
+                            
+                            if chunk_count > 0:
+                                is_new = False
+                                if len(rows) > 1:
+                                    print(f"    -> CẢNH BÁO: Tìm thấy {len(rows)} bản ghi trùng trong DB. Đang giữ lại ID: {str(p_db_id).strip()} và xóa các bản ghi thừa...")
+                                    for i in range(1, len(rows)):
+                                        dup_id = rows[i][2]
+                                        cur.execute('DELETE FROM "LegalDocuments" WHERE "documentId" = %s', (dup_id,))
+                                        print(f"       [Xóa rác] Đã xóa bản ghi trùng ID: {str(dup_id).strip()}")
+                                    db_conn.commit()
+                                    print(f"    -> Đã dọn dẹp xong các bản ghi trùng rác.")
+                                else:
+                                    print(f"    -> Văn bản này ĐÃ HOÀN THÀNH trong DB (ID: {str(p_db_id).strip()}, {chunk_count} chunks). Bỏ qua không crawl và không tải file.")
                             else:
-                                print(f"    -> Đã có trong DB (ID: {str(p_db_id).strip()}). Đang đối soát và cập nhật metadata mới nhất...")
-                            
-                            # 1. Cập nhật bản ghi chính
-                            cur.execute('UPDATE "LegalDocuments" SET status = %s, "effectiveDate" = %s WHERE "documentId" = %s', 
-                                       (s_web_status or p_db_status, s_web_eff or p_db_eff, p_db_id))
-                            
-                            # 2. Xóa tất cả các bản ghi trùng còn lại (nếu có)
-                            if len(rows) > 1:
-                                for i in range(1, len(rows)):
-                                    dup_id = rows[i][2]
-                                    cur.execute('DELETE FROM "LegalDocuments" WHERE "documentId" = %s', (dup_id,))
-                                    print(f"       [Xóa rác] Đã xóa bản ghi trùng ID: {str(dup_id).strip()}")
-                            
-                            db_conn.commit()
-                            print(f"    -> Đã dọn dẹp và cập nhật xong bản ghi chính.")
+                                print(f"    -> Phát hiện văn bản '{clean_num}' đã có metadata thô nhưng CHƯA ĐƯỢC TẠO VECTOR EMBEDDING (0 chunks). Tiến hành nạp lại toàn bộ...")
+                                is_new = True
+                                is_reimport = True
+                                docs_need_processing += 1
+                                if clean_num:
+                                    homepage_doc_ids.append(clean_num)
+                                
+                                # Ghi ngược Markdown và metadata từ DB ra đĩa để bảo toàn định dạng cũ cực đẹp
+                                try:
+                                    cur.execute('SELECT content, title, "documentNumber", "documentType", "effectiveDate", status, "issuingAuthority" FROM "LegalDocuments" WHERE "documentId" = %s', (p_db_id,))
+                                    db_row = cur.fetchone()
+                                    if db_row and db_row[0]:
+                                        db_content, db_title, db_doc_num, db_doc_type, db_eff_date, db_status, db_agency = db_row
+                                        
+                                        # Chuẩn hóa tên thư mục giống logic của save_document
+                                        clean_folder_num = db_doc_num or clean_num
+                                        prefixes = ['Nghị định', 'Thông tư', 'Quyết định', 'Luật', 'Nghị quyết', 'Chỉ thị', 'Thông tư liên tịch']
+                                        for pfix in prefixes:
+                                            if clean_folder_num.startswith(pfix):
+                                                clean_folder_num = clean_folder_num[len(pfix):].strip()
+                                                break
+                                        
+                                        def local_sanitize(filename: str) -> str:
+                                            if not filename: return "vanban"
+                                            filename = re.sub(r'[\x00-\x1f\\/:*?"<>|]', '_', filename)
+                                            filename = filename.replace('\n', '_').replace('\r', '_').strip()
+                                            if len(filename) > 90: filename = filename[:90].strip()
+                                            return filename
+                                            
+                                        doc_folder_name = local_sanitize(clean_folder_num if clean_folder_num and 'không số' not in clean_folder_num.lower() else db_title)
+                                        
+                                        # Tạo thư mục newvbpl_data/van_ban_moi/<doc_folder_name>
+                                        newvbpl_dir = Path("newvbpl_data/van_ban_moi") / doc_folder_name
+                                        newvbpl_dir.mkdir(parents=True, exist_ok=True)
+                                        
+                                        db_metadata = {
+                                            "url": doc_basic.get('url', ''),
+                                            "title": db_title,
+                                            "document_number": db_doc_num,
+                                            "issued_date": str(p_db_eff) if p_db_eff else doc_basic.get('issued_date', ''),
+                                            "effective_date": str(db_eff_date) if db_eff_date else '',
+                                            "status": db_status or '',
+                                            "issuing_agency": db_agency or ''
+                                        }
+                                        with open(newvbpl_dir / 'metadata.json', 'w', encoding='utf-8') as f:
+                                            json.dump(db_metadata, f, ensure_ascii=False, indent=2)
+                                            
+                                        # Tạo thư mục vbplmd/van_ban_moi/<doc_folder_name>
+                                        vbplmd_dir = Path("vbplmd/van_ban_moi") / doc_folder_name
+                                        vbplmd_dir.mkdir(parents=True, exist_ok=True)
+                                        
+                                        # Ghi file MD ra vbplmd (đặt tên file theo số hiệu thay / bằng .)
+                                        file_stem = local_sanitize(db_doc_num.replace('/', '.'))
+                                        with open(vbplmd_dir / f"{file_stem}.md", 'w', encoding='utf-8') as f:
+                                            f.write(db_content)
+                                            
+                                        # Ghi metadata.json sang vbplmd luôn
+                                        with open(vbplmd_dir / 'metadata.json', 'w', encoding='utf-8') as f:
+                                            json.dump(db_metadata, f, ensure_ascii=False, indent=2)
+                                            
+                                        print(f"    -> [THÀNH CÔNG] Đã ghi ngược Markdown cũ ({len(db_content)} ký tự) từ DB ra đĩa để tránh convert lại file đẹp.")
+                                        is_new = False  # Đánh dấu không cần crawl và tải lại file nữa
+                                except Exception as e_write:
+                                    if db_conn:
+                                        db_conn.rollback()
+                                    print(f"    [Cảnh báo] Lỗi khi ghi ngược Markdown từ DB: {e_write}")
                         else:
-                            print(f"    -> KHÔNG tìm thấy trong DB. Đây là văn bản mới.")
+                            print(f"    -> KHÔNG tìm thấy số hiệu '{clean_num}' trong DB. Đây là văn bản mới.")
+                            docs_need_processing += 1
+                            if clean_num:
+                                homepage_doc_ids.append(clean_num)
                     except Exception as e:
-                        db_conn.rollback()
-                        print(f"    [Lỗi DB Check] {e}")
+                        if db_conn: db_conn.rollback()
+                        print(f"    [Lỗi DB Check Sớm] {e}")
+                        docs_need_processing += 1
+                        if clean_num:
+                            homepage_doc_ids.append(clean_num)
                     finally:
                         if cur:
                             cur.close()
                 else:
-                    print("    [Lỗi] Không có kết nối DB để đối soát.")
+                    if not clean_num:
+                        print("    [Lỗi] Số hiệu trống, không thể check DB.")
+                    else:
+                        print("    [Lỗi] Không có kết nối DB để đối soát sớm.")
+                        docs_need_processing += 1
+                        if clean_num:
+                            homepage_doc_ids.append(clean_num)
 
-                # 4. Nếu là văn bản mới thì tải và lưu
+                # Nếu là văn bản mới thì tiến hành crawl chi tiết, tải và lưu
                 if is_new:
+                    # 2. Truy cập trang chi tiết để lấy metadata CHUẨN
+                    if is_reimport:
+                        print(f"[*] PHÁT HIỆN LỖI EMBEDDING CŨ. TIẾN HÀNH NẠP LẠI VÀ CHỈ MỤC HÓA: {clean_num}")
+                    else:
+                        print(f"[*] KHÔNG CÓ TRONG DB. BẮT ĐẦU TẢI CHI TIẾT: {clean_num}")
+                    full_metadata = crawler.get_detailed_metadata(doc_basic)
+                    
+                    # Hiển thị Metadata bóc tách được dưới dạng JSON
+                    print("\n    --- METADATA THU THẬP ĐƯỢC (JSON) ---")
+                    print(json.dumps(full_metadata, indent=2, ensure_ascii=False))
+                    print("    ------------------------------------\n")
+                    
+                    # 3. Tải và lưu file
                     crawler.save_document("van_ban_moi", full_metadata, full_metadata['url'])
                     downloaded_count += 1
             
             if db_conn: db_conn.close()
+
+            if homepage_doc_ids:
+                homepage_manifest = Path(".crawler-homepage-document-ids.json")
+                homepage_manifest.write_text(
+                    json.dumps(sorted(set(homepage_doc_ids)), ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                print(f"[Manifest] Da ghi {len(set(homepage_doc_ids))} so hieu trang chu -> {homepage_manifest.resolve()}")
+            else:
+                homepage_manifest = Path(".crawler-homepage-document-ids.json")
+                if homepage_manifest.exists():
+                    homepage_manifest.unlink()
             
-            if len(new_docs_basic) > 0:
-                print(f"CRAWLER_SIGNAL: NEW_DOCS_COUNT={len(new_docs_basic)}")
+            if docs_need_processing > 0:
+                print(f"CRAWLER_SIGNAL: NEW_DOCS_COUNT={docs_need_processing}")
             else:
                 print("CRAWLER_SIGNAL: NO_NEW_DOCS")
         else:

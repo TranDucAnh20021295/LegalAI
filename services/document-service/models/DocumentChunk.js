@@ -16,55 +16,62 @@ class DocumentChunk {
   }
 
   static async findByDocumentId(documentId, limit = 1000) {
+    const cleanId = String(documentId).trim();
     const result = await pool.query(
-      `SELECT "chunkId", "documentId", "contentChunk", "chunkIndex" FROM "${TABLE}" WHERE "documentId" = $1 ORDER BY "chunkIndex" ASC LIMIT $2`,
-      [documentId, limit]
+      `SELECT "chunkId", "documentId", "contentChunk", "chunkIndex" FROM "${TABLE}" WHERE TRIM("documentId") = $1 ORDER BY "chunkIndex" ASC LIMIT $2`,
+      [cleanId, limit]
     );
     return result.rows;
   }
 
 
-  static async updateEmbedding(chunkId, embedding, useLocal = false) {
+  static async updateEmbedding(chunkId, embedding) {
     if (!embedding || !Array.isArray(embedding)) return;
     const vectorSql = pgvector.toSql(embedding);
-    const col = useLocal ? 'embedding_768' : 'embedding';
     await pool.query(
-      `UPDATE "${TABLE}" SET "${col}" = $1 WHERE "chunkId" = $2`,
+      `UPDATE "${TABLE}" SET embedding = $1 WHERE "chunkId" = $2`,
       [vectorSql, chunkId]
     );
   }
 
-  static async searchSimilar(queryEmbedding, limit = 10, useLocal = false) {
+  static async searchSimilar(queryEmbedding, limit = 10) {
     if (!queryEmbedding || !Array.isArray(queryEmbedding)) return [];
     const vectorSql = pgvector.toSql(queryEmbedding);
-    const col = useLocal ? 'embedding_768' : 'embedding';
     const result = await pool.query(
-      `SELECT "chunkId", "documentId", "contentChunk", "chunkIndex", 1 - ("${col}" <=> $1::vector) AS similarity
-       FROM "${TABLE}" WHERE "${col}" IS NOT NULL ORDER BY "${col}" <=> $1::vector LIMIT $2`,
+      `SELECT "chunkId", "documentId", "contentChunk", "chunkIndex", 1 - (embedding <=> $1::vector) AS similarity
+       FROM "${TABLE}" WHERE embedding IS NOT NULL ORDER BY embedding <=> $1::vector LIMIT $2`,
       [vectorSql, limit]
     );
     return result.rows;
   }
 
   /** Semantic search + metadata văn bản (cho UI tra cứu AI). */
-  static async searchSimilarWithDocuments(queryEmbedding, limit = 20, useLocal = false, documentId = null, field = null) {
+  static async searchSimilarWithDocuments(queryEmbedding, limit = 20, documentId = null, field = null, queryText = null) {
     if (!queryEmbedding || !Array.isArray(queryEmbedding)) return [];
     const vectorSql = pgvector.toSql(queryEmbedding);
-    const col = useLocal ? 'embedding_768' : 'embedding';
-    
+    const { queryWantsAttachments } = require('../lib/chunkStrategy');
+    const includeAttachments = queryWantsAttachments(queryText);
+
     let query = `SELECT dc."chunkId", dc."documentId", dc."contentChunk", dc."chunkIndex",
-              1 - (dc."${col}" <=> $1::vector) AS similarity,
-              ld.title, ld."documentNumber", ld."documentType", ld.field
+              dc."chunkNo", dc."chunkType", dc."parentArticleId", dc."structuralLabel",
+              1 - (dc.embedding <=> $1::vector) AS similarity,
+              ld.title, ld."documentNumber", ld."documentType", ld.field,
+              ld.status, ld."effectiveDate"
        FROM "${TABLE}" dc
-       INNER JOIN "${LEGAL_TABLE}" ld ON ld."documentId" = dc."documentId"
-       WHERE dc."${col}" IS NOT NULL`;
+       INNER JOIN "${LEGAL_TABLE}" ld ON TRIM(ld."documentId") = TRIM(dc."documentId")
+       WHERE dc.embedding IS NOT NULL`;
+
+    if (!includeAttachments) {
+      query += ` AND (dc."chunkType" IS NULL OR dc."chunkType" IN ('article_full', 'article_child'))`;
+    }
     
     const params = [vectorSql];
     let paramIndex = 2;
 
     if (documentId) {
-      query += ` AND dc."documentId" = $${paramIndex}`;
-      params.push(documentId);
+      const cleanDocId = String(documentId).trim();
+      query += ` AND TRIM(dc."documentId") = $${paramIndex}`;
+      params.push(cleanDocId);
       paramIndex++;
     }
     
@@ -74,7 +81,7 @@ class DocumentChunk {
       paramIndex++;
     }
 
-    query += ` ORDER BY dc."${col}" <=> $1::vector LIMIT $${paramIndex}`;
+    query += ` ORDER BY dc.embedding <=> $1::vector LIMIT $${paramIndex}`;
     params.push(limit);
 
     const result = await pool.query(query, params);
@@ -83,7 +90,8 @@ class DocumentChunk {
 
 
   static async deleteByDocumentId(documentId) {
-    await pool.query(`DELETE FROM "${TABLE}" WHERE "documentId" = $1`, [documentId]);
+    const cleanId = String(documentId).trim();
+    await pool.query(`DELETE FROM "${TABLE}" WHERE TRIM("documentId") = $1`, [cleanId]);
   }
 }
 

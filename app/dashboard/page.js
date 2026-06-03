@@ -28,6 +28,7 @@ export default function DashboardPage() {
   const scrollRef = useRef(null);
   const menuRef = useRef(null);
   const mounted = useRef(false);
+  const skipNextMessageLoadForConv = useRef(null);
 
   // ── Auth guard (client-side only) ──
   useEffect(() => {
@@ -79,6 +80,10 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!activeConvId) { setMessages([]); return; }
+    if (skipNextMessageLoadForConv.current === activeConvId) {
+      skipNextMessageLoadForConv.current = null;
+      return;
+    }
     chatAPI.getMessages(activeConvId).then(setMessages).catch(() => setMessages([]));
   }, [activeConvId]);
 
@@ -177,6 +182,7 @@ export default function DashboardPage() {
       if (!convId) {
         const newConv = await chatAPI.createConversation(text.slice(0, 40));
         setConversations(prev => [newConv, ...prev]);
+        skipNextMessageLoadForConv.current = newConv.conversationId;
         setActiveConvId(newConv.conversationId);
         convId = newConv.conversationId;
       }
@@ -356,7 +362,7 @@ export default function DashboardPage() {
       <main className={styles.mainContent}>
         {/* Chat messages */}
         <div className={styles.chatScroll}>
-          {messages.length === 0 ? (
+          {messages.length === 0 && !sending ? (
             <div className={styles.welcome}>
               <div className={styles.welcomeIcon}>⚖️</div>
               <h1 className={styles.welcomeTitle}>Xin chào, {user?.fullName?.split(' ')[0] || 'bạn'}!</h1>

@@ -8,6 +8,7 @@ import { getUserToken, clearUserToken } from '@/lib/auth-storage';
 import { authAPI } from '@/lib/api';
 import { resolveDocumentIdFromParams } from '@/lib/vbpl';
 import styles from './page.module.css';
+import ChatWidget from '@/components/chat/ChatWidget';
 
 /** Xóa ký hiệu Markdown để hiển thị text thuần cho tiêu đề */
 function stripMd(text) {
@@ -26,16 +27,68 @@ function contentToHtml(text) {
   if (!text) return '';
   let s = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
+  // DEBUG TẠM: tìm đoạn chứa "Điều 2" để xem format thực tế
+  if (typeof window !== 'undefined') {
+    const idx = s.indexOf('Điều 2');
+    if (idx !== -1) console.log('[DEBUG Điều 2]', JSON.stringify(s.slice(Math.max(0, idx - 10), idx + 200)));
+  }
+
+  // ── FIX: Tách khoản đánh số khỏi dòng heading Markdown ──
+  // DB lưu: "### **Điều 2. Đối tượng áp dụng** 1. Người lao động..."
+  // Dùng \*+Điều...\*+ để bắt đúng phần title; [^\S\n]+ để chỉ match space cùng dòng
+  s = s.replace(
+    /^(#{1,6}\s+\*+Điều\s+\d+\.[^\n]*?\*+)[^\S\n]+(\d+\.\s)/gm,
+    '$1\n\n$2'
+  );
+
+
+
   // Xóa sạch các chuỗi ký tự rác (backslash, gạch đứng, gạch dưới...) xuất hiện liên tục
-  // Hỗ trợ cả trường hợp có dấu gạch chéo đi kèm gạch đứng \|\|\| hoặc \\\\
-  s = s.replace(/([\\\|\_\#\*]{2,}[\s]*){2,}/g, ' ');
-  s = s.replace(/[\\\|\_\#\*]{3,}/g, ' ');
+  // QUAN TRỌNG: dùng [^\S\n]* (không nuốt \n) thay vì [\s]* để tránh xóa mất ký tự xuống dòng
+  // Ví dụ: "****\n\n" → [\s]* sẽ nuốt \n\n → mất xuống dòng; [^\S\n]* sẽ giữ \n\n lại
+  s = s.replace(/([\\|\\_\#\*]{2,}[^\S\n]*){2,}/g, ' ');
+  s = s.replace(/[\\|\\_\#\*]{3,}/g, ' ');
+
 
   // Xóa ký hiệu kết thúc văn bản pháp luật truyền thống (./.) nếu người dùng thấy thừa
   s = s.replace(/\.\/\.\s*$/gm, '.');
 
-  // Tự động xuống dòng cho các tiêu đề lớn nếu bị dính liền (thường do lỗi convert PDF/Word)
-  s = s.replace(/([^\n])\s+(Chương [IVXLCDM\d]+|Điều \d+|Mục \d+|Phần [IVXLCDM\d]+|Phụ lục [IVXLCDM\d]*)/gi, '$1\n$2');
+  // ── Tự động xuống dòng trước các tiêu đề Điều/Chương/Mục ──
+  // Chỉ chèn newline trong 2 trường hợp an toàn:
+  // 1. Đứng sau kết thúc câu (dấu chấm, chấm phẩy) → rõ ràng là sang điều mới
+  s = s.replace(/([.;])\s+(Điều\s+\d+[\.\s])/g, '$1\n\n$2');
+  s = s.replace(/([.;])\s+(Chương\s+[IVXLCDM\d])/g, '$1\n\n$2');
+  s = s.replace(/([.;])\s+(Mục\s+\d+[\.\s])/g, '$1\n\n$2');
+  s = s.replace(/([.;])\s+(Phần\s+[IVXLCDM\d])/g, '$1\n\n$2');
+  // 2. Đứng ngay sau chuỗi CHỮ HOA (tên chương/mục viết hoa như "NHỮNG QUY ĐỊNH CHUNG Điều 1.")
+  s = s.replace(/([A-ZĐÁÀẢÃẠẮẶẦẨẪẬÂẤÉÈẸẺẼÊẾỀỆỂỄÍÌỊỈĨÓÒỌỎÕÔỐỒỘỔỖƠỚỜỢỞỠÚÙỤỦŨƯỨỪỰỬỮÝỲỴỶỸ]{2,})\s+(Điều\s+\d+[\.\s])/g, '$1\n\n$2');
+  s = s.replace(/([A-ZĐÁÀẢÃẠẮẶẦẨẪẬÂẤÉÈẸẺẼÊẾỀỆỂỄÍÌỊỈĨÓÒỌỎÕÔỐỒỘỔỖƠỚỜỢỞỠÚÙỤỦŨƯỨỪỰỬỮÝỲỴỶỸ]{2,})\s+(Chương\s+[IVXLCDM\d])/g, '$1\n\n$2');
+
+  // 3. Khoản đánh số (1. 2. 3...) liền sau tiêu đề điều khoản
+  // Dùng kỹ thuật protect/restore: tạm thay "Điều/Khoản/Mục X" bằng placeholder
+  // để tránh "Điều 24." bị tách thành "Điều\n24." (\b không hoạt động với Unicode tiếng Việt nên bỏ \b)
+  {
+    const _protectMap = [];
+    s = s.replace(
+      /(Điều|Khoản|Mục|Điểm|Chương|Phần|điều|khoản|mục|điểm|chương|phần)\s+(\d+)/g,
+      (match) => { _protectMap.push(match); return `\x00P${_protectMap.length - 1}\x00`; }
+    );
+    // Chỉ chèn newline khi: đứng SAU chữ thường (hết tiêu đề) + nội dung bắt đầu CHỮ HOA
+    s = s.replace(
+      /([a-zđáàảãạăắặầẩẫậâấéèẹẻẽêếềệểễíìịỉĩóòọỏõôốồộổỗơớờợởỡúùụủũưứừựửữýỳỵỷỹ])\s+(\d+\.\s+[A-ZĐÁÀẢÃẠĂẮẶẦẨẪẬÂẤÉÈẸẺẼÊẾỀỆỂỄÍÌỊỈĨÓÒỌỎÕÔỐỒỘỔỖƠỚỜỢỞỠÚÙỤỦŨƯỨỪỰỬỮÝỲỴỶỸ])/g,
+      '$1\n$2'
+    );
+    // Khôi phục placeholders
+    _protectMap.forEach((val, idx) => { s = s.replace(`\x00P${idx}\x00`, val); });
+  }
+
+
+  // Một số file MD dùng "- d)" như bullet list cho điểm luật. Khi hiển thị văn bản
+  // pháp luật, bỏ bullet để chỉ còn "d)".
+  s = s.replace(/(^|\n)\s*[-*]\s+([a-zđ]\)\s+)/gi, '$1$2');
+
+  // Bỏ qua regex tự động ngắt dòng trước Điều/Chương vì gây lỗi ngắt câu giữa dòng khi trích dẫn điều khoản.
+  // s = s.replace(/([^\n])\s+(Chương [IVXLCDM\d]+|Điều \d+|Mục \d+|Phần [IVXLCDM\d]+|Phụ lục [IVXLCDM\d]*)/gi, '$1\n$2');
 
   // Hàm xử lý Markdown cho một đoạn text
   const processMd = (t) => {
@@ -182,8 +235,7 @@ export default function VbplDetailPage() {
 
       <nav className={styles.topnavNav}>
         <Link href="/" className={styles.navLink}>Trang chủ</Link>
-        <Link href="/" className={`${styles.navLink} ${styles.navActive}`}>Văn bản pháp luật</Link>
-        <Link href="/dashboard" className={styles.navLink}>Hỏi đáp</Link>
+        <Link href="/dashboard" className={styles.navLink} target="_blank">Hỏi đáp</Link>
         <button className={styles.navCalcBtn}>📊 Tính thuế TNCN</button>
       </nav>
 
@@ -322,6 +374,7 @@ export default function VbplDetailPage() {
           />
         </div>
       </main>
+      <ChatWidget />
     </div>
   );
 }

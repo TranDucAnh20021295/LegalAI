@@ -1,4 +1,5 @@
 const pool = require('./database');
+const { migrateRagSchema } = require('../lib/migrateRagSchema');
 
 const initDatabase = async () => {
   try {
@@ -28,11 +29,6 @@ const initDatabase = async () => {
   } catch (e) {
     if (e.code !== '42701') console.warn('[Document] embedding column:', e.message);
   }
-  try {
-    await pool.query(`ALTER TABLE "DocumentChunks" ADD COLUMN embedding_768 vector(768)`);
-  } catch (e) {
-    if (e.code !== '42701') console.warn('[Document] embedding_768 column:', e.message);
-  }
 
   // --- HNSW Indexes for Vector Search Performance ---
   try {
@@ -41,12 +37,8 @@ const initDatabase = async () => {
   } catch (e) {
     console.warn('[Document] HNSW index (1536) failed:', e.message);
   }
-  try {
-    // Index cho Local SBERT (768 dimensions)
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_hnsw_embedding_768 ON "DocumentChunks" USING hnsw (embedding_768 vector_cosine_ops)`);
-  } catch (e) {
-    console.warn('[Document] HNSW index (768) failed:', e.message);
-  }
+
+  await migrateRagSchema(pool);
 };
 
 module.exports = initDatabase;

@@ -41,6 +41,10 @@ function sourceRowLabel(row) {
   return t && n ? `${t} (${n})` : t || n || 'Văn bản pháp luật';
 }
 
+function citationKey(text) {
+  return foldMatch(text).replace(/\s+/g, ' ');
+}
+
 /** Gộp theo documentId; nếu thiếu id thì gộp theo (số hiệu + tiêu đề). */
 function buildDisplaySources(sources) {
   const map = new Map();
@@ -274,11 +278,12 @@ function sourceCitedInAnswer(answerText, row) {
   return false;
 }
 
-/** Chỉ giữ văn bản mà nội dung phía trên có nhắc tới; một nguồn duy nhất → luôn hiển thị. */
+/** Chỉ hiển thị nguồn có trong metadata RAG/DB; không thêm nguồn AI tự nhắc ngoài DB. */
 function filterSourcesCitedInAnswer(answerText, displaySources) {
-  if (!displaySources.length) return [];
+  const cited = displaySources.filter((row) => sourceCitedInAnswer(answerText, row));
+  if (cited.length > 0) return cited;
   if (displaySources.length === 1) return displaySources;
-  return displaySources.filter((row) => sourceCitedInAnswer(answerText, row));
+  return displaySources.slice(0, 5);
 }
 
 export default function ChatAiMessage({ content, metadata, isNew, hideSources = false }) {
@@ -343,7 +348,7 @@ export default function ChatAiMessage({ content, metadata, isNew, hideSources = 
     return normalizeMarkdownListMarkers(raw);
   }, [displayedContent]);
 
-  const citedSources = useMemo(
+  const footerSources = useMemo(
     () => filterSourcesCitedInAnswer(displayText, displaySources),
     [displayText, displaySources]
   );
@@ -351,11 +356,38 @@ export default function ChatAiMessage({ content, metadata, isNew, hideSources = 
 
   const [panel, setPanel] = useState(null);
 
-  const openSource = useCallback((row) => {
+  const openSource = useCallback(async (row) => {
     if (row.documentId) {
       window.open(vbplHref(row.documentId), '_blank');
       return;
     }
+
+    if (row.documentNumber) {
+      setPanel({
+        phase: 'loading',
+        label: row.label,
+        documentId: null,
+        title: row.title || row.label,
+        documentNumber: row.documentNumber,
+        documentType: row.documentType,
+        body: '',
+        fetchFailed: false,
+      });
+
+      try {
+        const docs = await documentAPI.search(row.documentNumber, 5, 'documentNumber', true);
+        const list = Array.isArray(docs) ? docs : (Array.isArray(docs?.value) ? docs.value : []);
+        const found = list.find((doc) => String(doc.documentNumber || '').trim() === String(row.documentNumber || '').trim()) || list[0];
+        if (found?.documentId) {
+          window.open(vbplHref(found.documentId), '_blank');
+          setPanel(null);
+          return;
+        }
+      } catch {
+        // Fall through to the local excerpt panel below.
+      }
+    }
+
     // Chỉ hiện modal cho các đoạn trích không có ID chính thức
     setPanel({
       phase: 'excerpt',
@@ -364,8 +396,8 @@ export default function ChatAiMessage({ content, metadata, isNew, hideSources = 
       title: row.title || row.label,
       documentNumber: row.documentNumber,
       documentType: row.documentType,
-      body: row.excerpt || '—',
-      fetchFailed: false,
+      body: row.excerpt || 'Chưa tìm thấy toàn văn văn bản này trong cơ sở dữ liệu.',
+      fetchFailed: !row.excerpt,
     });
   }, []);
 
@@ -379,10 +411,10 @@ export default function ChatAiMessage({ content, metadata, isNew, hideSources = 
         </div>
 
 
-        {!hideSources && citedSources.length > 0 && (
+        {!hideSources && footerSources.length > 0 && (
           <div className={styles.refFooter}>
             <span className={styles.refFooterLead}>Bạn có thể tham khảo nội dung sau đây: </span>
-            {citedSources.map((d, i) => (
+            {footerSources.map((d, i) => (
               <Fragment key={d.key}>
                 {i > 0 && <span className={styles.refFooterSep}> · </span>}
                 <button

@@ -71,8 +71,13 @@ export default function ChatWidget() {
     setMessages(prev => [...prev, userMsg]);
 
     try {
+      const history = messages.slice(-4).map((m) => ({
+        senderType: m.senderType,
+        content: m.content,
+        metadata: m.metadata || null,
+      }));
       // Dùng askAnonymous để không lưu vào Database
-      const res = await chatAPI.askAnonymous(text, context?.id);
+      const res = await chatAPI.askAnonymous(text, context?.id, history);
       
       // Map kết quả trả về vào UI
       setMessages(prev => [...prev, { ...res.aiMessage, isNew: true }]);

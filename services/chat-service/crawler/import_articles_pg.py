@@ -74,6 +74,7 @@ def import_articles(data_dir="vbpl_articles"):
     base_dir = Path(data_dir)
     count = 0
     total = 0
+    imported_doc_ids = set()
 
     if not base_dir.exists():
         print(f"[ERROR] Thư mục {base_dir} không tồn tại!")
@@ -93,7 +94,16 @@ def import_articles(data_dir="vbpl_articles"):
             url = meta.get('url', '')
             if 'ItemID=' in url:
                 doc_id = url.split('ItemID=')[-1].split('&')[0]
+            if doc_id:
+                imported_doc_ids.add(str(doc_id).strip())
                 
+            # Tự động nhận diện loại văn bản thật (documentType) thay vì lấy mặc định "van_ban_moi"
+            try:
+                from import_vbplmd import detect_real_category
+                real_doc_type = detect_real_category(doc_dir, meta)
+            except Exception:
+                real_doc_type = doc_type
+
             local_batch = []
             for md_file in doc_dir.glob("*.md"):
                 try:
@@ -105,7 +115,7 @@ def import_articles(data_dir="vbpl_articles"):
                     content = content.replace('\x00', '').strip()
                     
                     local_batch.append((
-                        doc_id, title, meta.get('document_number', ''), doc_type,
+                        doc_id, title, meta.get('document_number', ''), real_doc_type,
                         meta.get('status', ''), parse_date(meta.get('issued_date', '')),
                         parse_date(meta.get('effective_date', '')), content, url
                     ))
@@ -196,6 +206,15 @@ def import_articles(data_dir="vbpl_articles"):
         conn.commit()
 
     print(f"HOAN TAT! Tong cong da insert {total} articles vao DB.")
+
+    if imported_doc_ids:
+        manifest_path = Path(".crawler-last-import-document-ids.json")
+        manifest_path.write_text(
+            json.dumps(sorted(imported_doc_ids), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"[Manifest] Da ghi {len(imported_doc_ids)} documentId -> {manifest_path.resolve()}")
+
     cursor.close()
     conn.close()
 

@@ -9,6 +9,99 @@ const Subscription = require('../models/Subscription');
 const router = express.Router();
 router.use(authMiddleware);
 
+const HISTORY_CONTEXT_LIMIT = 8;
+const WIDGET_HISTORY_LIMIT = 4;
+const HISTORY_MESSAGE_CHAR_LIMIT = 1200;
+
+function normalizeMetadata(metadata) {
+  if (!metadata) return null;
+  if (typeof metadata === 'object') return metadata;
+  try {
+    return JSON.parse(metadata);
+  } catch (e) {
+    return null;
+  }
+}
+
+function buildConversationContext(history) {
+  const recent = (history || [])
+    .filter((m) => m && m.content && (m.senderType || m.sendertype))
+    .slice(-HISTORY_CONTEXT_LIMIT);
+
+  if (recent.length === 0) return '';
+
+  return recent
+    .map((m) => {
+      const sender = String(m.senderType || m.sendertype).toUpperCase() === 'AI' ? 'AI' : 'User';
+      const content = String(m.content || '').replace(/\s+/g, ' ').trim().slice(0, HISTORY_MESSAGE_CHAR_LIMIT);
+      return `${sender}: ${content}`;
+    })
+    .join('\n');
+}
+
+function buildRetrievalQuery(history, currentContent) {
+  const current = String(currentContent || '').trim();
+  const historyText = buildConversationContext(history);
+  if (!historyText) return current;
+  return [
+    'Ngữ cảnh hội thoại gần đây (chỉ dùng để hiểu câu hỏi tiếp nối, không phải yêu cầu mới):',
+    historyText,
+    '',
+    `Câu hỏi hiện tại: ${current}`,
+  ].join('\n');
+}
+
+function inferDocumentIdFromHistory(history) {
+  const reversed = [...(history || [])].reverse();
+  for (const msg of reversed) {
+    const metadata = normalizeMetadata(msg.metadata);
+    const sources = Array.isArray(metadata?.ragSources) ? metadata.ragSources : [];
+    const documentIds = [...new Set(sources.map((s) => s?.documentId).filter(Boolean))];
+    if (documentIds.length === 1) return documentIds[0];
+  }
+  return null;
+}
+
+function mergeRagContexts(primary, related) {
+  const parts = [];
+  const sources = [];
+  const seenSourceKeys = new Set();
+
+  const add = (ctx, label) => {
+    if (!ctx) return;
+    if (ctx.contextText) {
+      parts.push(`### ${label}\n${ctx.contextText}`);
+    }
+    for (const source of ctx.sources || []) {
+      const key = source.chunkId || `${source.documentId || ''}:${source.title || ''}:${String(source.excerpt || '').slice(0, 80)}`;
+      if (seenSourceKeys.has(key)) continue;
+      seenSourceKeys.add(key);
+      sources.push(source);
+    }
+  };
+
+  add(primary, 'Văn bản đang đọc');
+  add(related, 'Văn bản liên quan');
+
+  return {
+    contextText: parts.join('\n\n---\n\n'),
+    sources,
+    docMeta: primary?.docMeta || null,
+  };
+}
+
+function normalizeClientHistory(history, limit = HISTORY_CONTEXT_LIMIT) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter((m) => m && typeof m.content === 'string' && m.content.trim())
+    .slice(-limit)
+    .map((m) => ({
+      content: m.content,
+      senderType: String(m.senderType || m.sendertype || '').toUpperCase() === 'AI' ? 'AI' : 'USER',
+      metadata: normalizeMetadata(m.metadata),
+    }));
+}
+
 router.get('/', async (req, res) => {
   try {
     const list = await Conversation.findByUserId(req.userId);
@@ -77,7 +170,7 @@ router.get('/:conversationId/messages', async (req, res) => {
 router.post('/:conversationId/messages', async (req, res) => {
   try {
     const { content, senderType, documentId, document_id } = req.body;
-    const finalDocId = documentId || document_id;
+    let finalDocId = documentId || document_id;
     if (!content || typeof content !== 'string') {
       return res.status(400).json({ message: 'Thiếu content' });
     }
@@ -149,6 +242,23 @@ router.post('/:conversationId/messages', async (req, res) => {
       }
     }
 
+    const previousMessages = type === 'USER'
+      ? await Message.getByConversationId(req.params.conversationId)
+      : [];
+    if (!finalDocId) {
+      finalDocId = inferDocumentIdFromHistory(previousMessages);
+      if (finalDocId) {
+        console.info('[Chat RAG] Suy luận documentId từ lịch sử hội thoại:', finalDocId);
+      }
+    }
+    const conversationContext = type === 'USER'
+      ? buildConversationContext(previousMessages)
+      : '';
+    const retrievalQuery = type === 'USER'
+      ? buildRetrievalQuery(previousMessages, content.trim())
+      : content.trim();
+    const currentQuery = content.trim();
+
     const msg = await Message.create(req.params.conversationId, content.trim(), type);
     await Conversation.touch(req.params.conversationId);
 
@@ -162,23 +272,30 @@ router.post('/:conversationId/messages', async (req, res) => {
     if (finalDocId) {
       // Luồng RAG tập trung theo văn bản cụ thể (người dùng đang xem trang VBPL)
       console.info('[Chat RAG] Chế độ document-specific, ID:', finalDocId);
-      const { contextText, sources: s, docMeta } = await getContextByDocumentId(finalDocId, content.trim());
-      sources = s;
-      aiContent = await generateReplyForDocument(content.trim(), contextText, docMeta);
+      const primaryContext = await getContextByDocumentId(finalDocId, retrievalQuery);
+      let relatedContext = null;
+      try {
+        relatedContext = await getContextFromDocuments(retrievalQuery, 6, null, null);
+      } catch (e) {
+        console.warn('[Chat RAG] Không lấy được văn bản liên quan:', e.message);
+      }
+      const merged = mergeRagContexts(primaryContext, relatedContext);
+      sources = merged.sources;
+      aiContent = await generateReplyForDocument(content.trim(), merged.contextText, merged.docMeta, conversationContext);
     } else {
       // Luồng RAG tổng quát: PHÂN LOẠI CATEGORY -> TÌM KIẾM -> TRẢ LỜI
       const { getDynamicConfig, classifyIntent } = require('../lib/rag');
       const cfg = await getDynamicConfig();
       
-      // 1. Phân loại câu hỏi thuộc lĩnh vực nào
-      const field = await classifyIntent(content.trim(), cfg);
+      // 1. Phân loại câu hỏi hiện tại, tránh lịch sử cũ kéo lệch sang lĩnh vực khác
+      const field = await classifyIntent(currentQuery, cfg);
       
-      // 2. Chỉ tìm kiếm các văn bản thuộc lĩnh vực đó
-      const { contextText, sources: s } = await getContextFromDocuments(content.trim(), 12, null, field);
+      // 2. Tìm kiếm theo câu hỏi hiện tại; lịch sử chỉ đưa vào prompt trả lời ở conversationContext
+      const { contextText, sources: s } = await getContextFromDocuments(currentQuery, 12, null, field);
       sources = s;
       
       // 3. Trả lời với System Prompt chuyên biệt của lĩnh vực đó
-      aiContent = await generateReply(content.trim(), contextText, field);
+      aiContent = await generateReply(content.trim(), contextText, field, conversationContext);
     }
 
     const metadata = sources && sources.length > 0 ? { ragSources: sources } : null;
@@ -198,8 +315,8 @@ router.post('/:conversationId/messages', async (req, res) => {
  */
 router.post('/ask-anonymous', async (req, res) => {
   try {
-    const { content, documentId, document_id } = req.body;
-    const finalDocId = documentId || document_id;
+    const { content, documentId, document_id, history, messages } = req.body;
+    let finalDocId = documentId || document_id;
     if (!content || typeof content !== 'string') {
       return res.status(400).json({ message: 'Thiếu content' });
     }
@@ -208,18 +325,36 @@ router.post('/ask-anonymous', async (req, res) => {
     // Ở đây ta cho phép nếu là Admin, hoặc chưa vượt quá giới hạn free.
     // (Có thể bỏ qua check này nếu muốn widget luôn free)
 
+    const previousMessages = normalizeClientHistory(history || messages, WIDGET_HISTORY_LIMIT);
+    if (!finalDocId) {
+      finalDocId = inferDocumentIdFromHistory(previousMessages);
+      if (finalDocId) {
+        console.info('[Chat RAG] Widget suy luận documentId từ lịch sử hội thoại:', finalDocId);
+      }
+    }
+    const conversationContext = buildConversationContext(previousMessages);
+    const retrievalQuery = buildRetrievalQuery(previousMessages, content.trim());
+    const currentQuery = content.trim();
+
     let aiContent, sources;
     if (finalDocId) {
-      const { contextText, sources: s, docMeta } = await getContextByDocumentId(finalDocId, content.trim());
-      sources = s;
-      aiContent = await generateReplyForDocument(content.trim(), contextText, docMeta);
+      const primaryContext = await getContextByDocumentId(finalDocId, retrievalQuery);
+      let relatedContext = null;
+      try {
+        relatedContext = await getContextFromDocuments(retrievalQuery, 6, null, null);
+      } catch (e) {
+        console.warn('[Chat RAG] Widget không lấy được văn bản liên quan:', e.message);
+      }
+      const merged = mergeRagContexts(primaryContext, relatedContext);
+      sources = merged.sources;
+      aiContent = await generateReplyForDocument(content.trim(), merged.contextText, merged.docMeta, conversationContext);
     } else {
       const { getDynamicConfig, classifyIntent } = require('../lib/rag');
       const cfg = await getDynamicConfig();
-      const field = await classifyIntent(content.trim(), cfg);
-      const { contextText, sources: s } = await getContextFromDocuments(content.trim(), 12, null, field);
+      const field = await classifyIntent(currentQuery, cfg);
+      const { contextText, sources: s } = await getContextFromDocuments(currentQuery, 12, null, field);
       sources = s;
-      aiContent = await generateReply(content.trim(), contextText, field);
+      aiContent = await generateReply(content.trim(), contextText, field, conversationContext);
     }
 
     const metadata = sources && sources.length > 0 ? { ragSources: sources } : null;

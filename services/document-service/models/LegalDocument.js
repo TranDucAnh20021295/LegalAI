@@ -142,21 +142,20 @@ class LegalDocument {
     return this.findAll(limit);
   }
 
-  static async searchSemantic(queryEmbedding, limit = 24, useLocal = false) {
+  static async searchSemantic(queryEmbedding, limit = 24) {
     if (!queryEmbedding || !Array.isArray(queryEmbedding)) return [];
     const pgvector = require('pgvector/pg');
-    const col = useLocal ? 'embedding_768' : 'embedding';
     const chunkTable = 'DocumentChunks';
 
     const query = `
       WITH best_chunks AS (
         SELECT 
           "documentId", 
-          MAX(1 - ("${col}" <=> $1::vector)) as max_similarity
+          MAX(1 - (embedding <=> $1::vector)) as max_similarity
         FROM "${chunkTable}"
-        WHERE "${col}" IS NOT NULL
+        WHERE embedding IS NOT NULL
         GROUP BY "documentId"
-        HAVING MAX(1 - ("${col}" <=> $1::vector)) > 0.4
+        HAVING MAX(1 - (embedding <=> $1::vector)) > 0.4
         ORDER BY max_similarity DESC
         LIMIT $2
       )

@@ -1,4 +1,3 @@
-import ChatWidget from '@/components/chat/ChatWidget'
 import './globals.css'
 
 export const metadata = {
@@ -17,7 +16,6 @@ export default function RootLayout({ children }) {
       </head>
       <body>
         {children}
-        <ChatWidget />
       </body>
     </html>
   )

@@ -34,7 +34,7 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 
-# Python (embedding-service, v.v.)
+# Python
 __pycache__/
 *.py[cod]
 *$py.class

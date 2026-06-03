@@ -1,5 +1,0 @@
-flask==3.0.0
-flask-cors==4.0.0
-sentence-transformers==2.2.2
-huggingface_hub<0.26
-gunicorn==21.2.0

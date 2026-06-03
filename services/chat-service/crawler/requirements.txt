@@ -6,3 +6,6 @@ psycopg2-binary>=2.9.0
 pdfplumber>=0.11.0
 textract>=1.6.5
 pywin32>=306; sys_platform == 'win32'
+playwright>=1.40.0
+playwright-stealth>=0.1.6
+markdownify>=0.11.6

@@ -19,7 +19,6 @@ const cors = require('cors');
 
 const initDatabase = require('./config/initDatabase');
 const documentRoutes = require('./routes/documents');
-const { runSync } = require('./lib/syncChunks');
 const { startStatusScheduler } = require('./lib/statusScheduler');
 const { getEmbeddingStatus } = require('./lib/embedding');
 
@@ -44,8 +43,6 @@ app.get('/health', (req, res) => {
 });
 
 const PORT = Number(process.env.PORT) || 5002;
-// Chỉ tự embed toàn bộ DB khi set AUTO_SYNC_CHUNKS_ON_STARTUP=true (mặc định tắt)
-const AUTO_SYNC = process.env.AUTO_SYNC_CHUNKS_ON_STARTUP === 'true';
 
 initDatabase()
   .then(() => {
@@ -55,15 +52,6 @@ initDatabase()
 
       // Tự động cập nhật status văn bản "Chưa có hiệu lực" → "Còn hiệu lực"
       startStatusScheduler();
-
-      if (AUTO_SYNC) {
-        setImmediate(() => {
-          console.log('[Document] Đang đồng bộ chunks + embedding (chạy nền)...');
-          runSync()
-            .then((r) => console.log(`[Document] Xong: ${r.totalIndexed}/${r.totalChunks} chunks đã embed từ ${r.totalDocuments} văn bản.`))
-            .catch((e) => console.error('[Document] Sync lỗi:', e.message));
-        });
-      }
     });
   })
   .catch((err) => {

@@ -1,17 +1,41 @@
 import os
 import time
 import psycopg2
-from openai import OpenAI
 import json
+import urllib.request
+from pathlib import Path
 
-# Đọc API key từ biến môi trường (đặt trong .env hoặc shell)
-# Không hardcode API key trực tiếp trong code!
-# Cách thiết lập: set OPENAI_API_KEY=sk-... (Windows) hoặc export OPENAI_API_KEY=sk-... (Linux/Mac)
+def _load_openai_key_from_env_files():
+    """Crawler spawn từ Node không tự có OPENAI_API_KEY — đọc từ .env giống document-service."""
+    if os.environ.get("OPENAI_API_KEY"):
+        return
+    root = Path(__file__).resolve().parents[3]
+    for env_path in (
+        root / "services" / "document-service" / ".env",
+        root / "services" / "chat-service" / ".env",
+        root / ".env.local",
+    ):
+        if not env_path.exists():
+            continue
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            if key.strip() == "OPENAI_API_KEY" and val.strip():
+                os.environ["OPENAI_API_KEY"] = val.strip().strip('"').strip("'")
+                return
+
+
+_load_openai_key_from_env_files()
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 if not OPENAI_API_KEY:
-    raise EnvironmentError("Thiếu biến môi trường OPENAI_API_KEY. Vui lòng thiết lập trước khi chạy script.")
+    raise EnvironmentError(
+        "Thiếu OPENAI_API_KEY. Thêm vào services/document-service/.env hoặc biến môi trường hệ thống."
+    )
 
 MODEL_NAME = "gpt-4o-mini"
+CLASSIFY_TIMEOUT_SECONDS = float(os.environ.get("CLASSIFY_TIMEOUT_SECONDS", "20"))
 
 DB_CONFIG = {
     'host': 'localhost',
@@ -20,7 +44,6 @@ DB_CONFIG = {
     'password': '123456',
     'dbname': 'legal_ai'
 }
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 CATEGORIES = [
     "Dân sự & Hôn nhân Gia đình",
@@ -35,45 +58,70 @@ CATEGORIES = [
     "Khác"
 ]
 
+
+def _parse_classify_response(result_text):
+    if result_text.startswith("```json"):
+        result_text = result_text.strip("`").removeprefix("json").strip()
+    data = json.loads(result_text)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("categories", "tags", "fields", "linh_vuc"):
+            val = data.get(key)
+            if isinstance(val, list):
+                return val
+        first = next(iter(data.values()), None)
+        if isinstance(first, list):
+            return first
+    return [str(data)]
+
+
 def classify_legal_document(title, brief_content):
     """
     Sử dụng OpenAI gọi GPT để phân loại lĩnh vực luật dựa trên nội dung tóm tắt.
     """
     try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
+        print(f"[AI Classify] Gọi OpenAI API HTTP ({MODEL_NAME}, timeout={CLASSIFY_TIMEOUT_SECONDS}s)...", flush=True)
+        payload = json.dumps({
+            "model": MODEL_NAME,
+            "messages": [
                 {
                     "role": "system",
                     "content": (
-                        "Bạn là một chuyên gia pháp lý hệ thống Pháp luật Việt Nam. "
-                        "Nhiệm vụ của bạn là lấy Tiêu đề và một phần đầu của Văn bản, sau đó "
-                        "phân loại văn bản này thuộc từ 1 đến tối đa 3 lĩnh vực pháp luật phù hợp nhất.\n"
-                        f"CHỈ CHỌN từ danh sách sau: {json.dumps(CATEGORIES, ensure_ascii=False)}.\n"
-                        "Quan trọng: TRẢ VỀ CHÍNH XÁC cấu trúc mảng JSON, không giải thích gì thêm. Ví dụ: [\"Tài chính - Kế toán - Thuế\"]"
+                        "Bạn phân loại văn bản pháp luật Việt Nam. "
+                        f"CHỈ chọn từ danh sách: {json.dumps(CATEGORIES, ensure_ascii=False)}. "
+                        'Trả về JSON đúng dạng: {"categories": ["Tên lĩnh vực"]} với 1-3 phần tử.'
                     )
                 },
                 {
                     "role": "user",
-                    "content": f"Tiêu đề: {title}\nTrích đoạn nội dung:\n{brief_content}"
+                    "content": f"Tiêu đề: {title}\nTrích đoạn:\n{brief_content[:400]}"
                 }
             ],
-            temperature=0, 
-            response_format={ "type": "json_object" } if "gpt-4" in MODEL_NAME or "gpt-3.5" in MODEL_NAME else None 
+            "temperature": 0,
+            "response_format": {"type": "json_object"},
+            "max_tokens": 80,
+        }).encode("utf-8")
+
+        request = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
         )
-        
-        result_text = response.choices[0].message.content.strip()
-        
-        try:
-            if result_text.startswith("```json"):
-                result_text = result_text.strip("`").removeprefix("json").strip()
-            return json.loads(result_text)
-        except:
-            return [result_text]
-            
+
+        with urllib.request.urlopen(request, timeout=CLASSIFY_TIMEOUT_SECONDS) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        result_text = data["choices"][0]["message"]["content"].strip()
+        return _parse_classify_response(result_text)
+
     except Exception as e:
-        print(f"Lỗi khi gọi OpenAI: {e}")
-        return ["Khác"]
+        print(f"[AI Classify] Lỗi OpenAI: {type(e).__name__}: {e}", flush=True)
+        return None
 
 def run_classifier():
     print("Connecting to Database...")

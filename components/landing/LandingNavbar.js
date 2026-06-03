@@ -24,7 +24,6 @@ export default function LandingNavbar({
       </Link>
       <nav className={styles.topnavNav}>
         <button className={`${styles.navLink} ${styles.navLinkActive}`}>Trang chủ</button>
-        <button className={styles.navLink}>Văn bản pháp luật</button>
         <Link href="/dashboard" className={styles.navLink} target="_blank">Hỏi đáp</Link>
         <button className={styles.navCalcBtn} onClick={() => setCalcOpen(true)}>📊 Tính thuế TNCN</button>
 

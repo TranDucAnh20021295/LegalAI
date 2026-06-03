@@ -185,13 +185,16 @@ export default function AdminDashboard() {
   
   const handleStopCrawler = async () => {
     if (!window.confirm('Bạn có chắc chắn muốn dừng tiến trình cập nhật này không?')) return;
+    setCrawlerState((p) => ({ ...p, isRunning: false, currentTask: '' }));
     try {
       await chatAPI.adminCrawlerStop();
       setToastMessage({ text: 'Đã gửi yêu cầu dừng tiến trình!', type: 'success' });
       setTimeout(() => setToastMessage({ text: '', type: 'success' }), 3000);
+      chatAPI.adminCrawlerStatus().then(setCrawlerState).catch(() => {});
     } catch (e) {
-      setToastMessage({ text: e.response?.data?.message || 'Lỗi khi dừng tiến trình!', type: 'error' });
-      setTimeout(() => setToastMessage({ text: '', type: 'error' }), 3000);
+      setToastMessage({ text: e.response?.data?.message || 'Đã gửi lệnh dừng (kiểm tra log).', type: 'success' });
+      setTimeout(() => setToastMessage({ text: '', type: 'success' }), 3000);
+      chatAPI.adminCrawlerStatus().then(setCrawlerState).catch(() => {});
     }
   };
 

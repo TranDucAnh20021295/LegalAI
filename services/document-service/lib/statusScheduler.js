@@ -75,9 +75,6 @@ function parseDate(str) {
  * timezone/locale của Node.js khi parse các chuỗi ngày phức tạp.
  */
 async function runStatusUpdate() {
-  const startTime = Date.now();
-  console.log('[StatusScheduler] Bắt đầu kiểm tra văn bản "Chưa có hiệu lực"...');
-
   try {
     const pendingLower = PENDING_STATUSES.map(s => s.toLowerCase());
 
@@ -92,11 +89,8 @@ async function runStatusUpdate() {
     const total = parseInt(countRes.rows[0]?.cnt, 10) || 0;
 
     if (total === 0) {
-      console.log('[StatusScheduler] Không có văn bản nào đang ở trạng thái "Chưa có hiệu lực".');
       return { checked: 0, updated: 0, skipped: 0 };
     }
-
-    console.log(`[StatusScheduler] Tìm thấy ${total} văn bản cần kiểm tra.`);
 
     // Cập nhật bằng 1 câu SQL duy nhất — PostgreSQL tự parse và so sánh ngày.
     // effectiveDate được lưu dạng chuỗi JS Date ("Wed Jul 01 2026 00:00:00 GMT+0700 (Indochina Time)")
@@ -133,20 +127,6 @@ async function runStatusUpdate() {
     const updated = updatedDocs.length;
     const skipped = total - updated;
 
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log(
-      `[StatusScheduler] Hoàn tất sau ${elapsed}s — ` +
-      `Đã cập nhật: ${updated} | Chưa đến hạn / lỗi parse: ${skipped}`
-    );
-
-    if (updatedDocs.length > 0) {
-      console.log('[StatusScheduler] Các văn bản đã được cập nhật sang "Còn hiệu lực":');
-      updatedDocs.forEach(d => {
-        const title = (d.title || '').substring(0, 60);
-        console.log(`  ✅ [${d.documentNumber}] ${title} (hiệu lực: ${d.effectiveDate})`);
-      });
-    }
-
     return { checked: total, updated, skipped };
   } catch (err) {
     console.error('[StatusScheduler] Lỗi khi cập nhật status:', err.message);
@@ -178,9 +158,6 @@ function startStatusScheduler() {
     // Sau lần đầu, lên lịch chạy mỗi ngày lúc 00:05
     const scheduleNext = async () => {
       const delay = msUntilNextMidnight();
-      const hours = Math.floor(delay / 3600000);
-      const minutes = Math.floor((delay % 3600000) / 60000);
-      console.log(`[StatusScheduler] Lần chạy tiếp theo sau ${hours}h ${minutes}m (lúc 00:05 ngày mai).`);
 
       setTimeout(async () => {
         await runStatusUpdate();
@@ -190,8 +167,6 @@ function startStatusScheduler() {
 
     scheduleNext();
   }, 5000);
-
-  console.log('[StatusScheduler] Đã khởi động — sẽ kiểm tra sau 5 giây và lặp lại hàng ngày lúc 00:05.');
 }
 
 module.exports = { startStatusScheduler, runStatusUpdate };

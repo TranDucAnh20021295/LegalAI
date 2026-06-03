@@ -87,9 +87,116 @@ PDFUNITE_EXE = str((POPPLER_BIN_DIR / "pdfunite.exe").absolute())
 TESSERACT_EXE = r"D:\Tesseract-OCR\tesseract.exe"
 if not os.path.exists(TESSERACT_EXE):
     TESSERACT_EXE = "tesseract"
+PDFINFO_EXE = str((POPPLER_BIN_DIR / "pdfinfo.exe").absolute())
+
+# PDF → MD: ưu tiên text-layer, OCR scan ở DPI cao khi thiếu text
+PDF_OCR_DPI = 300
+PDF_TEXT_MIN_CHARS_PER_PAGE = 120
 
 os.environ["PATH"] = f"{TESSERACT_DIR};{GS_BIN_DIR};" + os.environ["PATH"]
 os.environ["TESSDATA_PREFIX"] = TESSDATA_DIR
+
+# Sửa lỗi OCR phổ biến (chỉ thay chuỗi rõ ràng, tránh đụng số hiệu văn bản)
+_OCR_TYPO_FIXES = [
+    (r"\bquy\s+dịnh\b", "quy định"),
+    (r"\bdân\s+chiếu\b", "dẫn chiếu"),
+    (r"\bdẫn\s+chiếu\b", "dẫn chiếu"),
+    (r"\bTồng\s+cục\b", "Tổng cục"),
+    (r"\bTông\s+Tham\b", "Tổng Tham"),
+    (r"\bBộ\s+Tông\b", "Bộ Tổng"),
+    (r"\bBO\s+TRUONG\b", "BỘ TRƯỞNG"),
+    (r"\bDai\s+tướng\b", "Đại tướng"),
+    (r"\btai\s+bồ\b", "tái bổ"),
+    (r"\btái\s+bồ\b", "tái bổ"),
+    (r"\btai\s+bô\b", "tái bổ"),
+    (r"\btái\s+bô\b", "tái bổ"),
+    (r"\bnêu\s+chính\b", "nêu chính"),
+    (r"\bchê\s+độ\b", "chế độ"),
+    (r"\bchê\s+đôi\b", "chế độ"),
+    (r"\bthập\s+hơn\b", "thấp hơn"),
+    (r"\bQuôc\s+phòng\b", "Quốc phòng"),
+    (r"\bT\s+hông\s+tư\b", "Thông tư"),
+    (r"\bsửa\s+đồi\b", "sửa đổi"),
+    (r"\bbồ\s+sung\b", "bổ sung"),
+    (r"\bthay\s+thê\b", "thay thế"),
+    (r"\bbăng\b", "bằng"),
+    (r"\bNghị\s+định\s+sô\b", "Nghị định số"),
+    (r"\bNghị\s+định\s+so\b", "Nghị định số"),
+]
+
+
+def fix_common_ocr_errors(text):
+    if not text:
+        return ""
+    for pattern, replacement in _OCR_TYPO_FIXES:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
+
+
+def get_pdf_page_count(pdf_path):
+    if not os.path.exists(PDFINFO_EXE):
+        return None
+    try:
+        res = subprocess.run(
+            [PDFINFO_EXE, str(pdf_path.absolute())],
+            capture_output=True, text=True, errors="replace", timeout=30,
+        )
+        if res.returncode != 0:
+            return None
+        m = re.search(r"Pages:\s+(\d+)", res.stdout or "")
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+def extract_pdf_page_text(pdf_path, page_num):
+    """Lấy text-layer một trang bằng pdftotext -layout."""
+    if not os.path.exists(PDFTOTEXT_PATH):
+        return ""
+    try:
+        res = subprocess.run(
+            [
+                PDFTOTEXT_PATH, "-layout", "-enc", "UTF-8",
+                "-f", str(page_num), "-l", str(page_num),
+                str(pdf_path.absolute()), "-",
+            ],
+            capture_output=True, text=True, errors="replace", timeout=60,
+        )
+        if res.returncode != 0:
+            return ""
+        return (res.stdout or "").strip()
+    except Exception:
+        return ""
+
+
+def text_layer_page_is_usable(text):
+    """Đủ text thật để tin cậy (tránh chỉ lấy header/footer của PDF scan)."""
+    stripped = (text or "").strip()
+    if len(stripped) < PDF_TEXT_MIN_CHARS_PER_PAGE:
+        return False
+    long_lines = [ln for ln in stripped.splitlines() if len(ln.strip()) > 55]
+    if len(long_lines) >= 2:
+        return True
+    if len(stripped) >= 500 and re.search(r"[À-ỹĐđ]", stripped):
+        return True
+    if re.search(r"\b(Điều|Nghị định|quy định|Thông tư|Chương|Mục)\b", stripped, re.IGNORECASE):
+        return len(stripped) >= 220
+    return False
+
+
+def promote_legal_headings(text):
+    """Giữ cấu trúc Điều/Chương/Mục cho bước split_by_articles."""
+    lines = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            lines.append("")
+            continue
+        if re.match(r"^(Điều|CHƯƠNG|MỤC|PHẦN)\s+", s, re.IGNORECASE):
+            lines.append(f"## {s}")
+        else:
+            lines.append(s)
+    return "\n".join(lines)
 
 def run_ocr_pipeline(pdf_path, target_md_path):
     """Pipeline OCR khôi phục layout cho PDF quét"""
@@ -334,155 +441,106 @@ def convert_pdf_to_docx_via_word(pdf_path, docx_path, word_app=None):
             except: pass
             pythoncom.CoUninitialize()
 
+def ocr_page_image(page_png, ocr_dir, page_idx, tess_env):
+    """OCR một trang ảnh với cấu hình tối ưu cho văn bản pháp luật."""
+    ocr_prefix = ocr_dir / f"page-{page_idx}-ocr"
+    ocr_txt_file = ocr_dir / f"page-{page_idx}-ocr.txt"
+    tess_cmd = [
+        TESSERACT_EXE,
+        str(page_png.absolute()),
+        str(ocr_prefix),
+        "-l", "vie+eng",
+        "--oem", "1",
+        "--psm", "4",
+        "-c", "preserve_interword_spaces=1",
+        "txt",
+    ]
+    for attempt in range(1, 4):
+        res_tess = subprocess.run(
+            tess_cmd, env=tess_env, capture_output=True, text=True, errors="replace", timeout=180,
+        )
+        if res_tess.returncode == 0 and ocr_txt_file.exists():
+            return ocr_txt_file.read_text(encoding="utf-8").strip()
+        print(f"      [!] Tesseract trang {page_idx} thất bại lần {attempt}. Đang thử lại...", flush=True)
+        time.sleep(2)
+    return ""
+
+
 def convert_pdf_to_md_new_flow(pdf_path, target_md_path):
     """
-    Quy trình mới: PDF gốc -> pdftoppm (tách trực tiếp ra ảnh PNG từng trang) -> tesseract (OCR từng ảnh sang PDF searchable) -> Word (.docx từng trang) -> Word (.md từng trang) -> gộp .md
+    Hybrid PDF → MD:
+    1) Thử text-layer (pdftotext) từng trang — chuẩn nhất cho PDF có text thật.
+    2) Trang thiếu text → OCR 300 DPI grayscale + Tesseract PSM4.
+    3) Sửa lỗi OCR phổ biến + giữ cấu trúc Điều/Chương.
     """
-    print(f"  [*] Khởi động quy trình chuyển đổi trang-trang tối ưu cho {pdf_path.name}...", flush=True)
-    
-    # Tạo thư mục tạm làm việc
-    temp_dir = Path(tempfile.mkdtemp(prefix="pdf_page_flow_"))
-    word_app = None
+    print(f"  [*] PDF → MD (hybrid): {pdf_path.name}...", flush=True)
+    temp_dir = Path(tempfile.mkdtemp(prefix="pdf_md_hybrid_"))
     try:
-        # Khởi tạo một đối tượng Word dùng chung duy nhất để tối ưu bộ nhớ ảo
-        pythoncom.CoInitialize()
-        try:
-            word_app = win32com.client.DispatchEx("Word.Application")
-            word_app.Visible = False
-            word_app.DisplayAlerts = 0
-        except Exception as e:
-            print(f"    [!] Không thể khởi động Microsoft Word: {e}", flush=True)
-            return False
-
+        page_count = get_pdf_page_count(pdf_path)
         images_dir = temp_dir / "images"
         ocr_dir = temp_dir / "ocr"
-        docx_dir = temp_dir / "docx"
-        md_dir = temp_dir / "md"
-        
         images_dir.mkdir(parents=True, exist_ok=True)
         ocr_dir.mkdir(parents=True, exist_ok=True)
-        docx_dir.mkdir(parents=True, exist_ok=True)
-        md_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 1. tách trực tiếp thành các file ảnh PNG: pdftoppm.exe -png -r 150 <input.pdf> <images_dir>/page
-        print(f"    [1/4] Đang tách trực tiếp các trang PDF thành ảnh PNG bằng pdftoppm...", flush=True)
+
         ppm_cmd = [
-            PDFTOPPM_EXE,
-            "-png",
-            "-r", "150",
-            str(pdf_path.absolute()),
-            str(images_dir / "page")
+            PDFTOPPM_EXE, "-png", "-gray", "-r", str(PDF_OCR_DPI),
+            str(pdf_path.absolute()), str(images_dir / "page"),
         ]
-        res_ppm = subprocess.run(ppm_cmd, capture_output=True, text=True, errors="replace", timeout=300)
+        res_ppm = subprocess.run(ppm_cmd, capture_output=True, text=True, errors="replace", timeout=600)
         if res_ppm.returncode != 0:
-            print(f"      [!] Lỗi pdftoppm: {res_ppm.stderr}", flush=True)
+            print(f"      [!] Lỗi pdftoppm: {res_ppm.stderr[-400:] if res_ppm.stderr else res_ppm.returncode}", flush=True)
             return False
-            
-        # Tìm danh sách ảnh PNG được tạo ra và sắp xếp theo thứ tự số trang
+
         png_files = sorted(
             [f for f in images_dir.glob("page-*.png") if f.is_file()],
-            key=lambda x: int(re.search(r"page-(\d+)\.png", x.name).group(1))
+            key=lambda x: int(re.search(r"page-(\d+)\.png", x.name).group(1)),
         )
-        
         if not png_files:
-            print(f"      [!] Lỗi: Không tìm thấy file ảnh PNG nào được tạo ra.", flush=True)
+            print("      [!] Không tách được trang ảnh từ PDF.", flush=True)
             return False
-            
-        print(f"    -> Đã tách thành công {len(png_files)} trang ảnh PNG.", flush=True)
-        
-        md_page_files = []
-        
-        # Lặp qua từng trang ảnh để chạy OCR -> DOCX -> MD
+
+        num_pages = page_count or len(png_files)
+        print(f"    -> {num_pages} trang | DPI {PDF_OCR_DPI} | hybrid text-layer + OCR", flush=True)
+
+        tess_env = os.environ.copy()
+        tess_env["TESSDATA_PREFIX"] = TESSDATA_DIR
+
+        md_page_contents = []
+        text_pages = 0
+        ocr_pages = 0
+
         for idx, page_png in enumerate(png_files, 1):
-            print(f"      [*] Đang xử lý trang {idx}/{len(png_files)}...", flush=True)
-            
-            # 2. OCR ảnh PNG sang PDF có chữ: tesseract.exe <page.png> <ocr_dir>/page-i-ocr -l vie+eng pdf
-            ocr_prefix = ocr_dir / f"page-{idx}-ocr"
-            tess_cmd = [
-                TESSERACT_EXE,
-                str(page_png.absolute()),
-                str(ocr_prefix),
-                "-l", "vie+eng",
-                "pdf"
-            ]
-            
-            tess_env = os.environ.copy()
-            if "TESSDATA_PREFIX" not in tess_env:
-                tess_env["TESSDATA_PREFIX"] = TESSDATA_DIR
-                
-            tess_success = False
-            ocr_pdf = ocr_dir / f"page-{idx}-ocr.pdf"
-            for attempt in range(1, 4):
-                res_tess = subprocess.run(tess_cmd, env=tess_env, capture_output=True, text=True, errors="replace", timeout=120)
-                if res_tess.returncode == 0 and ocr_pdf.exists():
-                    tess_success = True
-                    break
-                else:
-                    print(f"      [!] Tesseract trang {idx} thất bại lần {attempt} (code: {res_tess.returncode}). Đang thử lại...", flush=True)
-                    time.sleep(2)
-                    
-            if not tess_success:
-                print(f"      [!] Lỗi: Tesseract thất bại sau 3 lần thử ở trang {idx}. Stderr: {res_tess.stderr}", flush=True)
-                return False
-            
-            # 3. dox: Chuyển page-i-ocr.pdf sang Word .docx
-            page_docx = docx_dir / f"page-{idx}.docx"
-            docx_success = False
-            for attempt in range(1, 4):
-                if convert_pdf_to_docx_via_word(ocr_pdf, page_docx, word_app=word_app) and page_docx.exists():
-                    docx_success = True
-                    break
-                else:
-                    print(f"      [!] Word -> DOCX trang {idx} thất bại lần {attempt}. Đang thử lại...", flush=True)
-                    time.sleep(2)
-                    
-            if not docx_success:
-                print(f"      [!] Lỗi: Không thể chuyển PDF trang {idx} sang DOCX sau 3 lần thử.", flush=True)
-                return False
-                
-            # 4. md: Chuyển page-i.docx sang page-i.md
-            page_md = md_dir / f"page-{idx}.md"
-            md_success = False
-            for attempt in range(1, 4):
-                if convert_document_to_md_native(page_docx, page_md, word_app=word_app) and page_md.exists():
-                    md_success = True
-                    break
-                else:
-                    print(f"      [!] DOCX -> MD trang {idx} thất bại lần {attempt}. Đang thử lại...", flush=True)
-                    time.sleep(2)
-                    
-            if not md_success:
-                print(f"      [!] Lỗi: Không thể chuyển Word trang {idx} sang MD sau 3 lần thử.", flush=True)
-                return False
-                
-            md_page_files.append(page_md)
-            
-        # 5. Gộp toàn bộ các file MD đơn lẻ thành file MD hoàn chỉnh
-        print(f"    [4/4] Đang gộp {len(md_page_files)} trang Markdown...", flush=True)
-        final_markdown_content = []
-        for idx, page_md in enumerate(md_page_files, 1):
-            if page_md.exists():
-                content = page_md.read_text(encoding="utf-8").strip()
-                if content:
-                    final_markdown_content.append(content)
-                    
-        # Lưu file MD cuối cùng
+            page_text = extract_pdf_page_text(pdf_path, idx)
+            if text_layer_page_is_usable(page_text):
+                text_pages += 1
+                print(f"    [trang {idx}/{len(png_files)}] text-layer ({len(page_text)} ký tự)", flush=True)
+                body = page_text
+            else:
+                ocr_pages += 1
+                print(f"    [trang {idx}/{len(png_files)}] OCR scan...", flush=True)
+                body = ocr_page_image(page_png, ocr_dir, idx, tess_env)
+                if not body.strip():
+                    print(f"      [!] Trang {idx} không lấy được nội dung.", flush=True)
+                    return False
+
+            body = fix_common_ocr_errors(body)
+            body = clean_markdown_text(body)
+            body = promote_legal_headings(body)
+            md_page_contents.append(body)
+
+        final_content = "\n\n<!-- pagebreak -->\n\n".join(md_page_contents) + "\n"
         with open(target_md_path, "w", encoding="utf-8") as f:
-            f.write("\n\n<!-- pagebreak -->\n\n".join(final_markdown_content) + "\n")
-            
-        print(f"  [SUCCESS] Đã hoàn tất và lưu tại: {target_md_path.name}", flush=True)
+            f.write(final_content)
+
+        print(
+            f"  [SUCCESS] {target_md_path.name} | text-layer: {text_pages} trang, OCR: {ocr_pages} trang",
+            flush=True,
+        )
         return True
-            
     except Exception as e:
-        print(f"  [ERR] Lỗi hệ thống trong quy trình chuyển đổi: {e}", flush=True)
+        print(f"  [ERR] PDF hybrid: {e}", flush=True)
         return False
     finally:
-        if word_app:
-            try:
-                word_app.Quit()
-                del word_app
-            except: pass
-        pythoncom.CoUninitialize()
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 def process_file_logic(file_path, rel_folder, dst_md_root, dst_mid_root, force=False):
